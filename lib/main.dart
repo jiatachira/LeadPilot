@@ -7,6 +7,7 @@ import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:share_plus/share_plus.dart';
 import 'package:timezone/data/latest.dart' as timezone_data;
@@ -18,6 +19,50 @@ const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
 const _defaultWhatsAppCountryCode = '94';
+const reminderSnoozeDuration = Duration(minutes: 5);
+const studentReminderActions = <AndroidNotificationAction>[
+  AndroidNotificationAction(
+    'call_student',
+    'Call',
+    showsUserInterface: true,
+    cancelNotification: true,
+  ),
+  AndroidNotificationAction(
+    'snooze_reminder',
+    'Snooze 5 min',
+    showsUserInterface: false,
+    cancelNotification: true,
+  ),
+];
+
+DateTime snoozedReminderDateTime(DateTime now) =>
+    now.add(reminderSnoozeDuration);
+
+DateTime combineReminderDateAndTime(
+  DateTime selectedDate,
+  TimeOfDay selectedTime,
+) => DateTime(
+  selectedDate.year,
+  selectedDate.month,
+  selectedDate.day,
+  selectedTime.hour,
+  selectedTime.minute,
+);
+
+bool isReminderDateTimeInFuture(DateTime dateTime, {required DateTime now}) =>
+    dateTime.isAfter(now);
+
+final _studentReminderCategory = DarwinNotificationCategory(
+  'student_call_reminder',
+  actions: [
+    DarwinNotificationAction.plain(
+      'call_student',
+      'Call',
+      options: {DarwinNotificationActionOption.foreground},
+    ),
+    DarwinNotificationAction.plain('snooze_reminder', 'Snooze 5 min'),
+  ],
+);
 
 String _defaultSheetName(String url) {
   final uri = Uri.tryParse(url);
@@ -48,6 +93,11 @@ String normalizeContactPhone(String phoneNumber) {
     digits = '$_defaultWhatsAppCountryCode${digits.substring(1)}';
   }
   return digits;
+}
+
+Uri smsComposerUri(String phoneNumber) {
+  final digits = normalizeContactPhone(phoneNumber);
+  return Uri(scheme: 'sms', path: digits.isEmpty ? '' : '+$digits');
 }
 
 enum StudentActivityLevel { active, cooling, inactive, unknown }
@@ -577,18 +627,29 @@ class LocalReminderService implements ReminderScheduler {
     final notificationPlugin = plugin ?? _defaultPlugin;
     return _initialization ??= notificationPlugin
         .initialize(
-          settings: const InitializationSettings(
-            android: AndroidInitializationSettings('ic_notification'),
+          settings: InitializationSettings(
+            android: const AndroidInitializationSettings('ic_notification'),
             iOS: DarwinInitializationSettings(
               requestAlertPermission: false,
               requestBadgePermission: false,
               requestSoundPermission: false,
+              notificationCategories: [_studentReminderCategory],
             ),
           ),
+          onDidReceiveNotificationResponse: _handleReminderNotificationResponse,
+          onDidReceiveBackgroundNotificationResponse:
+              _handleBackgroundReminderNotificationResponse,
         )
-        .then((initialized) {
+        .then((initialized) async {
           if (initialized == false) {
             throw StateError('Local notifications could not be initialized.');
+          }
+          final launchDetails = await notificationPlugin
+              .getNotificationAppLaunchDetails();
+          final response = launchDetails?.notificationResponse;
+          if (launchDetails?.didNotificationLaunchApp == true &&
+              response != null) {
+            _handleReminderNotificationResponse(response);
           }
         });
   }
@@ -618,7 +679,10 @@ class LocalReminderService implements ReminderScheduler {
   ) async {
     await initialize(_plugin);
     if (!dateTime.isAfter(DateTime.now())) {
-      throw StateError('Choose a future date and time for the reminder.');
+      throw StateError(
+        'The selected reminder time has passed. Choose a later time today '
+        'or a future date.',
+      );
     }
 
     final android = _plugin
@@ -660,10 +724,15 @@ class LocalReminderService implements ReminderScheduler {
           groupKey: groupKey,
           importance: Importance.max,
           priority: Priority.high,
+          category: AndroidNotificationCategory.alarm,
+          actions: studentReminderActions,
         ),
-        iOS: DarwinNotificationDetails(),
+        iOS: const DarwinNotificationDetails(
+          categoryIdentifier: 'student_call_reminder',
+        ),
       ),
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      payload: jsonEncode({'name': student.name, 'phone': student.phone}),
     );
     await _saveScheduledReminder(student, dateTime);
   }
@@ -879,11 +948,71 @@ class LocalReminderService implements ReminderScheduler {
   }
 }
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   timezone_data.initializeTimeZones();
   timezone.setLocalLocation(timezone.UTC);
+  await LocalReminderService.initialize();
   runApp(const StudentCallApp());
+}
+
+void _handleReminderNotificationResponse(NotificationResponse response) {
+  final student = _studentFromReminderPayload(response.payload);
+  if (student == null) return;
+
+  switch (response.actionId) {
+    case 'call_student':
+      unawaited(_callStudentFromReminder(student));
+    case 'snooze_reminder':
+      unawaited(_snoozeReminder(student));
+  }
+}
+
+@pragma('vm:entry-point')
+void _handleBackgroundReminderNotificationResponse(
+  NotificationResponse response,
+) async {
+  if (response.actionId != 'snooze_reminder') return;
+  WidgetsFlutterBinding.ensureInitialized();
+  final student = _studentFromReminderPayload(response.payload);
+  if (student != null) await _snoozeReminder(student);
+}
+
+Student? _studentFromReminderPayload(String? payload) {
+  if (payload == null || payload.isEmpty) return null;
+  try {
+    final decoded = jsonDecode(payload);
+    if (decoded is! Map<String, dynamic>) return null;
+    final name = decoded['name']?.toString().trim() ?? '';
+    final phone = decoded['phone']?.toString().trim() ?? '';
+    if (name.isEmpty || phone.isEmpty) return null;
+    return Student(name: name, phone: phone);
+  } on FormatException catch (error) {
+    debugPrint('Invalid student reminder payload: $error');
+    return null;
+  }
+}
+
+Future<void> _callStudentFromReminder(Student student) async {
+  try {
+    final launched = await launchUrl(Uri.parse('tel:${student.phone}'));
+    if (!launched) {
+      debugPrint('Could not open the phone dialer for ${student.name}.');
+    }
+  } on Exception catch (error) {
+    debugPrint('Could not start the reminder call: $error');
+  }
+}
+
+Future<void> _snoozeReminder(Student student) async {
+  try {
+    await LocalReminderService().scheduleStudentReminder(
+      student,
+      snoozedReminderDateTime(DateTime.now()),
+    );
+  } on Exception catch (error) {
+    debugPrint('Could not snooze the reminder for ${student.name}: $error');
+  }
 }
 
 class StudentCallApp extends StatefulWidget {
@@ -1824,7 +1953,7 @@ class _LeadFilterSelection {
 
 enum _SettingsAction { sheetSync, filters, export, saveContacts }
 
-enum _StudentCardAction { edit, saveContact, selectMultiple }
+enum _StudentCardAction { edit, selectMultiple }
 
 class SheetApiException implements Exception {
   const SheetApiException(this.message);
@@ -2861,7 +2990,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                 onCall: () => _callStudent(students[index]),
                                 onWhatsApp: () =>
                                     _openWhatsAppChat(students[index]),
+                                onSms: () => _sendStudentSms(students[index]),
                                 onNote: () => _showStudentNote(students[index]),
+                                onSaveContact: () =>
+                                    _saveStudentContact(students[index]),
                               ),
                             ),
                     ),
@@ -2924,6 +3056,25 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _sendStudentSms(Student student) async {
+    if (normalizeContactPhone(student.phone).isEmpty) {
+      _showMessage('No valid phone number is available for ${student.name}.');
+      return;
+    }
+
+    try {
+      final launched = await launchUrl(
+        smsComposerUri(student.phone),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && mounted) {
+        _showMessage('Could not open the SMS composer for ${student.name}.');
+      }
+    } on Exception catch (error) {
+      if (mounted) _showMessage('Could not open SMS: $error');
+    }
+  }
+
   Future<void> _saveVisibleContacts() async {
     final students = _filteredStudents;
     if (students.isEmpty) {
@@ -2973,12 +3124,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     Navigator.pop(sheetContext, _StudentCardAction.edit),
               ),
               ListTile(
-                leading: const Icon(Icons.person_add_alt_1_rounded),
-                title: const Text('Save contact'),
-                onTap: () =>
-                    Navigator.pop(sheetContext, _StudentCardAction.saveContact),
-              ),
-              ListTile(
                 leading: const Icon(Icons.checklist_rounded),
                 title: const Text('Select multiple'),
                 subtitle: const Text('Select contacts to save or export'),
@@ -2996,9 +3141,6 @@ class _HomeScreenState extends State<HomeScreen> {
     switch (action) {
       case _StudentCardAction.edit:
         await _editStudent(student);
-        break;
-      case _StudentCardAction.saveContact:
-        await _saveStudentContact(student);
         break;
       case _StudentCardAction.selectMultiple:
         _startSelection(student);
@@ -3056,104 +3198,121 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showStudentNote(Student student) {
-    final comments =
-        <
-          ({
-            DateTime? date,
-            String dateLabel,
-            int order,
-            String status,
-            String text,
-          })
-        >[];
-    final attemptCommentCounts = <String, int>{};
-    var order = 0;
-    for (final attempt in student.attempts) {
-      if (attempt.comment.trim().isEmpty) continue;
-      final date = DateTime.tryParse(attempt.dateTime);
-      final text = attempt.comment.trim();
+    _showStudentHistory(
+      context,
+      student,
+      title: 'Call history · ${student.name}',
+    );
+  }
+}
+
+Future<void> _showStudentHistory(
+  BuildContext context,
+  Student student, {
+  required String title,
+}) {
+  final entries =
+      <
+        ({
+          DateTime? date,
+          String dateLabel,
+          int order,
+          String status,
+          String text,
+        })
+      >[];
+  final attemptCommentCounts = <String, int>{};
+  var order = 0;
+  for (final attempt in student.attempts) {
+    final date = DateTime.tryParse(attempt.dateTime);
+    final text = attempt.comment.trim();
+    if (text.isNotEmpty) {
       attemptCommentCounts.update(
         text,
         (count) => count + 1,
         ifAbsent: () => 1,
       );
-      comments.add((
-        date: date,
-        dateLabel: date == null ? attempt.dateTime : _formatReminder(date),
-        order: order++,
-        status: attempt.status,
-        text: text,
-      ));
     }
+    entries.add((
+      date: date,
+      dateLabel: date == null ? attempt.dateTime : _formatReminder(date),
+      order: order++,
+      status: attempt.status,
+      text: text,
+    ));
+  }
 
-    for (final entry in student.commentHistory) {
-      final separator = entry.indexOf(' — ');
-      final text = separator < 0
-          ? entry.trim()
-          : entry.substring(separator + 3).trim();
-      if (text.isEmpty) continue;
-      final duplicateCount = attemptCommentCounts[text] ?? 0;
-      if (duplicateCount > 0) {
-        attemptCommentCounts[text] = duplicateCount - 1;
-        continue;
-      }
-      final dateLabel = separator < 0 ? '' : entry.substring(0, separator);
-      final date = dateLabel.length >= 10
-          ? DateTime.tryParse(dateLabel.substring(0, 10))
-          : null;
-      comments.add((
-        date: date,
-        dateLabel: dateLabel,
-        order: order++,
-        status: '',
-        text: text,
-      ));
+  for (final entry in student.commentHistory) {
+    final separator = entry.indexOf(' — ');
+    final text = separator < 0
+        ? entry.trim()
+        : entry.substring(separator + 3).trim();
+    if (text.isEmpty) continue;
+    final duplicateCount = attemptCommentCounts[text] ?? 0;
+    if (duplicateCount > 0) {
+      attemptCommentCounts[text] = duplicateCount - 1;
+      continue;
     }
-    if (student.comment.trim().isNotEmpty &&
-        !comments.any((comment) => comment.text == student.comment.trim())) {
-      comments.add((
-        date: null,
-        dateLabel: '',
-        order: order++,
-        status: student.callStatus,
-        text: student.comment.trim(),
-      ));
-    }
-    comments.sort((left, right) {
-      if (left.date == null && right.date != null) return 1;
-      if (right.date == null && left.date != null) return -1;
-      final dateComparison = left.date?.compareTo(right.date!) ?? 0;
-      return dateComparison != 0
-          ? dateComparison
-          : left.order.compareTo(right.order);
-    });
+    final dateLabel = separator < 0 ? '' : entry.substring(0, separator);
+    final date = dateLabel.length >= 10
+        ? DateTime.tryParse(dateLabel.substring(0, 10))
+        : null;
+    entries.add((
+      date: date,
+      dateLabel: dateLabel,
+      order: order++,
+      status: '',
+      text: text,
+    ));
+  }
+  final currentComment = student.comment.trim();
+  if (currentComment.isNotEmpty &&
+      !entries.any((entry) => entry.text == currentComment)) {
+    entries.add((
+      date: null,
+      dateLabel: '',
+      order: order++,
+      status: student.callStatus,
+      text: currentComment,
+    ));
+  }
+  entries.sort((left, right) {
+    if (left.date == null && right.date != null) return 1;
+    if (right.date == null && left.date != null) return -1;
+    final dateComparison = left.date?.compareTo(right.date!) ?? 0;
+    return dateComparison != 0
+        ? dateComparison
+        : left.order.compareTo(right.order);
+  });
 
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Comments · ${student.name}'),
-        content: SizedBox(
-          width: 440,
-          child: comments.isEmpty && student.note.isEmpty
-              ? const Text('No comments have been saved for this student.')
-              : ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 420),
-                  child: ListView.separated(
-                    shrinkWrap: true,
-                    itemCount: comments.isEmpty ? 1 : comments.length,
-                    separatorBuilder: (_, _) => const Divider(height: 22),
-                    itemBuilder: (context, index) {
-                      if (comments.isEmpty) return Text(student.note);
-                      final comment = comments[index];
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
+  return showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: SizedBox(
+        width: 440,
+        child: entries.isEmpty && student.note.isEmpty
+            ? const Text('No call history or comments have been saved.')
+            : ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 420),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: entries.isEmpty ? 1 : entries.length,
+                  separatorBuilder: (_, _) => const Divider(height: 22),
+                  itemBuilder: (context, index) {
+                    if (entries.isEmpty) return Text(student.note);
+                    final entry = entries[index];
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (entry.status.isNotEmpty ||
+                            entry.dateLabel.isNotEmpty)
                           Row(
                             children: [
-                              if (comment.status.isNotEmpty)
+                              if (entry.status.isNotEmpty)
                                 Expanded(
                                   child: Text(
-                                    comment.status,
+                                    entry.status,
                                     style: TextStyle(
                                       color: Theme.of(context)
                                           .colorScheme
@@ -3162,9 +3321,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                   ),
                                 ),
-                              if (comment.dateLabel.isNotEmpty)
+                              if (entry.dateLabel.isNotEmpty)
                                 Text(
-                                  comment.dateLabel,
+                                  entry.dateLabel,
                                   style: TextStyle(
                                     color: Theme.of(context)
                                         .colorScheme
@@ -3174,23 +3333,24 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                             ],
                           ),
+                        if (entry.text.isNotEmpty) ...[
                           const SizedBox(height: 6),
-                          Text(comment.text),
+                          Text(entry.text),
                         ],
-                      );
-                    },
-                  ),
+                      ],
+                    );
+                  },
                 ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
+              ),
       ),
-    );
-  }
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
+  );
 }
 
 class _LeadFilterSheet extends StatefulWidget {
@@ -3446,7 +3606,9 @@ class StudentCard extends StatelessWidget {
     required this.onLongPress,
     required this.onCall,
     required this.onWhatsApp,
+    required this.onSms,
     required this.onNote,
+    required this.onSaveContact,
     this.isSelectionMode = false,
     this.isSelected = false,
     super.key,
@@ -3457,7 +3619,9 @@ class StudentCard extends StatelessWidget {
   final VoidCallback onLongPress;
   final VoidCallback onCall;
   final VoidCallback onWhatsApp;
+  final VoidCallback onSms;
   final VoidCallback onNote;
+  final VoidCallback onSaveContact;
   final bool isSelectionMode;
   final bool isSelected;
 
@@ -3665,7 +3829,10 @@ class StudentCard extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             _QuickActionButton(
-                              icon: Icons.chat_bubble_outline_rounded,
+                              icon: const Icon(
+                                Icons.chat_bubble_outline_rounded,
+                                size: 19,
+                              ),
                               tooltip: 'Comments',
                               onPressed: onNote,
                               backgroundColor: isDark
@@ -3677,7 +3844,10 @@ class StudentCard extends StatelessWidget {
                             ),
                             const SizedBox(width: 8),
                             _QuickActionButton(
-                              icon: Icons.chat_rounded,
+                              icon: const FaIcon(
+                                FontAwesomeIcons.whatsapp,
+                                size: 19,
+                              ),
                               tooltip: 'Open WhatsApp chat',
                               onPressed: onWhatsApp,
                               backgroundColor: isDark
@@ -3687,9 +3857,32 @@ class StudentCard extends StatelessWidget {
                             ),
                             const SizedBox(width: 6),
                             _QuickActionButton(
-                              icon: Icons.call_rounded,
+                              icon: const Icon(Icons.sms_outlined, size: 19),
+                              tooltip: 'Send SMS',
+                              onPressed: onSms,
+                              backgroundColor: isDark
+                                  ? const Color(0xFF1F3548)
+                                  : const Color(0xFFEAF2FA),
+                              foregroundColor: const Color(0xFF2E6FA3),
+                            ),
+                            const SizedBox(width: 6),
+                            _QuickActionButton(
+                              icon: const Icon(Icons.call_rounded, size: 19),
                               tooltip: 'Call student',
                               onPressed: onCall,
+                              backgroundColor: isDark
+                                  ? const Color(0xFF17382F)
+                                  : const Color(0xFFE9F6F1),
+                              foregroundColor: _green,
+                            ),
+                            const SizedBox(width: 6),
+                            _QuickActionButton(
+                              icon: const Icon(
+                                Icons.person_add_alt_1_rounded,
+                                size: 19,
+                              ),
+                              tooltip: 'Save contact',
+                              onPressed: onSaveContact,
                               backgroundColor: isDark
                                   ? const Color(0xFF17382F)
                                   : const Color(0xFFE9F6F1),
@@ -3850,7 +4043,7 @@ class _QuickActionButton extends StatelessWidget {
     required this.foregroundColor,
   });
 
-  final IconData icon;
+  final Widget icon;
   final String tooltip;
   final VoidCallback onPressed;
   final Color backgroundColor;
@@ -3867,7 +4060,7 @@ class _QuickActionButton extends StatelessWidget {
         fixedSize: const Size(40, 40),
         padding: EdgeInsets.zero,
       ),
-      icon: Icon(icon, size: 19),
+      icon: icon,
     );
   }
 }
@@ -4038,7 +4231,13 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
 
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final preferredDate = _nextCallDateTime ?? now;
+    final defaultReminder = now.add(const Duration(minutes: 1));
+    final existingReminder = _nextCallDateTime;
+    final pickerInitialDateTime =
+        existingReminder != null && existingReminder.isAfter(now)
+        ? existingReminder
+        : defaultReminder;
+    final preferredDate = existingReminder ?? pickerInitialDateTime;
     try {
       final selectedDate = await showDatePicker(
         context: context,
@@ -4051,22 +4250,26 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
 
       final selectedTime = await showTimePicker(
         context: context,
-        initialTime: _nextCallDateTime == null
-            ? TimeOfDay.fromDateTime(now)
-            : TimeOfDay.fromDateTime(_nextCallDateTime!),
+        initialTime: TimeOfDay.fromDateTime(pickerInitialDateTime),
         helpText: 'Select next call time',
       );
       if (!mounted || selectedTime == null) return;
 
-      setState(() {
-        _nextCallDateTime = DateTime(
-          selectedDate.year,
-          selectedDate.month,
-          selectedDate.day,
-          selectedTime.hour,
-          selectedTime.minute,
+      final selectedDateTime = combineReminderDateAndTime(
+        selectedDate,
+        selectedTime,
+      );
+      if (!isReminderDateTimeInFuture(selectedDateTime, now: DateTime.now())) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'That time has already passed today. Choose a later time.',
+            ),
+          ),
         );
-      });
+        return;
+      }
+      setState(() => _nextCallDateTime = selectedDateTime);
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.maybeOf(context)?.showSnackBar(
@@ -4082,92 +4285,11 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
     }
   }
 
-  Future<void> _showCommentHistory() async {
-    final attempts = List<CallAttempt>.of(widget.student.attempts)
-      ..sort((left, right) {
-        final leftDate = DateTime.tryParse(left.dateTime);
-        final rightDate = DateTime.tryParse(right.dateTime);
-        if (leftDate == null || rightDate == null) {
-          return left.dateTime.compareTo(right.dateTime);
-        }
-        return leftDate.compareTo(rightDate);
-      });
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Call attempt history'),
-        content: SizedBox(
-          width: 420,
-          child: attempts.isEmpty && widget.student.commentHistory.isEmpty
-              ? const Text('No call attempts have been saved.')
-              : ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 360),
-                  child: attempts.isEmpty
-                      ? ListView.separated(
-                          shrinkWrap: true,
-                          itemCount: widget.student.commentHistory.length,
-                          separatorBuilder: (_, _) => const Divider(height: 20),
-                          itemBuilder: (context, index) =>
-                              Text(widget.student.commentHistory[index]),
-                        )
-                      : ListView.separated(
-                          shrinkWrap: true,
-                          itemCount: attempts.length,
-                          separatorBuilder: (_, _) => const Divider(height: 20),
-                          itemBuilder: (context, index) {
-                            final attempt = attempts[index];
-                            final dateTime = DateTime.tryParse(
-                              attempt.dateTime,
-                            );
-                            final timestamp = dateTime == null
-                                ? attempt.dateTime
-                                : _formatReminder(dateTime);
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        attempt.status,
-                                        style: TextStyle(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .onSurface,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                    Text(
-                                      timestamp,
-                                      style: TextStyle(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurfaceVariant,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                if (attempt.comment.isNotEmpty) ...[
-                                  const SizedBox(height: 6),
-                                  Text(attempt.comment),
-                                ],
-                              ],
-                            );
-                          },
-                        ),
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
+  Future<void> _showCommentHistory() => _showStudentHistory(
+    context,
+    widget.student,
+    title: 'Call attempt history',
+  );
 
   @override
   Widget build(BuildContext context) {

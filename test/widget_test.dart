@@ -101,6 +101,11 @@ void main() {
     );
   });
 
+  test('builds SMS composer links with normalized phone numbers', () {
+    expect(smsComposerUri('070 106 1244').toString(), 'sms:+94701061244');
+    expect(smsComposerUri('+1 (555) 010-1234').toString(), 'sms:+15550101234');
+  });
+
   test('allocates stable, distinct reminder notification IDs per phone', () {
     final firstId = allocateReminderNotificationId('0701061244', const {});
     final secondId = allocateReminderNotificationId('+94 70 106 1245', {
@@ -114,6 +119,44 @@ void main() {
     expect(
       allocateReminderNotificationId('0701061244', {firstId}),
       isNot(firstId),
+    );
+  });
+
+  test('reminder actions offer calling and a five-minute snooze', () {
+    expect(studentReminderActions.map((action) => (action.id, action.title)), [
+      ('call_student', 'Call'),
+      ('snooze_reminder', 'Snooze 5 min'),
+    ]);
+    expect(
+      snoozedReminderDateTime(DateTime(2026, 11, 13, 9, 0)),
+      DateTime(2026, 11, 13, 9, 5),
+    );
+  });
+
+  test('rejects reminder times on today that are not in the future', () {
+    final now = DateTime(2026, 11, 13, 8);
+    final today = DateTime(2026, 11, 13);
+    final pastTime = combineReminderDateAndTime(
+      today,
+      const TimeOfDay(hour: 7, minute: 59),
+    );
+    expect(isReminderDateTimeInFuture(pastTime, now: now), isFalse);
+    expect(
+      isReminderDateTimeInFuture(
+        combineReminderDateAndTime(today, const TimeOfDay(hour: 8, minute: 1)),
+        now: now,
+      ),
+      isTrue,
+    );
+    expect(
+      isReminderDateTimeInFuture(
+        combineReminderDateAndTime(
+          DateTime(2026, 11, 14),
+          const TimeOfDay(hour: 7, minute: 59),
+        ),
+        now: now,
+      ),
+      isTrue,
     );
   });
 
@@ -272,7 +315,9 @@ void main() {
             onLongPress: () {},
             onCall: () {},
             onWhatsApp: () {},
+            onSms: () {},
             onNote: () {},
+            onSaveContact: () {},
           ),
         ),
       ),
@@ -1190,63 +1235,81 @@ void main() {
     expect(find.textContaining('1 already saved'), findsOneWidget);
   });
 
-  testWidgets('long-press actions edit or save only the selected contact', (
-    tester,
-  ) async {
-    final contactsService = FakeDeviceContactsService()
-      ..result = const SaveContactsResult(alreadySaved: 1);
-    final settingsStore = MemoryAppSettingsStore()
-      ..pin = '2580'
-      ..sheetConfig = 'https://script.google.com/macros/s/test/exec';
-    final students = [
-      {
-        'name': 'Pending Student',
-        'contact': '070-100-0001',
-        'addedDate': DateTime.now().toIso8601String(),
-        'callStatus': 'Pending',
-        'attempts': [],
-      },
-      {
-        'name': 'Interested Student',
-        'contact': '070-100-0002',
-        'addedDate': DateTime.now().toIso8601String(),
-        'callStatus': 'Interested',
-        'attempts': [],
-      },
-    ];
-    final client = MockClient(
-      (_) async => http.Response(jsonEncode({'students': students}), 200),
-    );
-    await tester.pumpWidget(
-      testApp(
-        httpClient: client,
-        settingsStore: settingsStore,
-        deviceContactsService: contactsService,
-      ),
-    );
-    await tester.pumpAndSettle();
-    await enterPin(tester, '2580');
-    await tester.pumpAndSettle();
+  testWidgets(
+    'save quick action saves a contact; long press keeps edit and selection',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.longPress(find.text('Pending Student'));
-    await tester.pumpAndSettle();
-    expect(find.text('Edit'), findsOneWidget);
-    expect(find.text('Save contact'), findsOneWidget);
-    expect(find.text('Select multiple'), findsOneWidget);
+      final contactsService = FakeDeviceContactsService()
+        ..result = const SaveContactsResult(alreadySaved: 1);
+      final settingsStore = MemoryAppSettingsStore()
+        ..pin = '2580'
+        ..sheetConfig = 'https://script.google.com/macros/s/test/exec';
+      final students = [
+        {
+          'name': 'Pending Student',
+          'contact': '070-100-0001',
+          'addedDate': DateTime.now().toIso8601String(),
+          'callStatus': 'Pending',
+          'attempts': [],
+        },
+        {
+          'name': 'Interested Student',
+          'contact': '070-100-0002',
+          'addedDate': DateTime.now().toIso8601String(),
+          'callStatus': 'Interested',
+          'attempts': [],
+        },
+      ];
+      final client = MockClient(
+        (_) async => http.Response(jsonEncode({'students': students}), 200),
+      );
+      await tester.pumpWidget(
+        testApp(
+          httpClient: client,
+          settingsStore: settingsStore,
+          deviceContactsService: contactsService,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await enterPin(tester, '2580');
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Save contact'));
-    await tester.pumpAndSettle();
+      expect(find.byTooltip('Comments'), findsNWidgets(2));
+      expect(find.byTooltip('Open WhatsApp chat'), findsNWidgets(2));
+      expect(find.byTooltip('Send SMS'), findsNWidgets(2));
+      expect(find.byTooltip('Call student'), findsNWidgets(2));
+      final pendingStudentCard = find.ancestor(
+        of: find.text('Pending Student'),
+        matching: find.byType(Card),
+      );
+      final saveContactButton = find.descendant(
+        of: pendingStudentCard,
+        matching: find.byTooltip('Save contact'),
+      );
+      expect(saveContactButton, findsOneWidget);
+      await tester.ensureVisible(saveContactButton);
+      await tester.tap(saveContactButton);
+      await tester.pumpAndSettle();
 
-    expect(contactsService.receivedStudents, hasLength(1));
-    expect(contactsService.receivedStudents.single.name, 'Pending Student');
-    expect(find.textContaining('already saved'), findsOneWidget);
+      expect(contactsService.receivedStudents, hasLength(1));
+      expect(contactsService.receivedStudents.single.name, 'Pending Student');
+      expect(find.textContaining('already saved'), findsOneWidget);
 
-    await tester.longPress(find.text('Pending Student'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Edit'));
-    await tester.pumpAndSettle();
-    expect(find.text('Update Details'), findsOneWidget);
-  });
+      await tester.longPress(find.text('Pending Student'));
+      await tester.pumpAndSettle();
+      expect(find.text('Edit'), findsOneWidget);
+      expect(find.text('Save contact'), findsNothing);
+      expect(find.text('Select multiple'), findsOneWidget);
+
+      await tester.tap(find.text('Edit'));
+      await tester.pumpAndSettle();
+      expect(find.text('Update Details'), findsOneWidget);
+    },
+  );
 
   testWidgets('bulk selection saves only selected contacts', (tester) async {
     final contactsService = FakeDeviceContactsService()
@@ -1360,7 +1423,7 @@ void main() {
     expect(settingsStore.themeMode, ThemeMode.system);
   });
 
-  testWidgets('Comments opens the full chronological comment history', (
+  testWidgets('Comments opens the full chronological call history', (
     tester,
   ) async {
     final settingsStore = MemoryAppSettingsStore()
@@ -1388,6 +1451,11 @@ void main() {
             'status': 'Interested',
             'comment': 'Asked for details',
           },
+          {
+            'dateTime': '2025-01-04T11:00:00',
+            'status': 'Not Responding',
+            'comment': '',
+          },
         ],
       },
     ];
@@ -1408,12 +1476,23 @@ void main() {
     await tester.tap(find.byTooltip('Comments'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Comments · Mia Patel'), findsOneWidget);
+    expect(find.text('Call history · Mia Patel'), findsOneWidget);
+    final historyDialog = find.byType(AlertDialog);
+    expect(find.text('No Answer'), findsOneWidget);
+    expect(
+      find.descendant(of: historyDialog, matching: find.text('Interested')),
+      findsOneWidget,
+    );
+    expect(find.text('Not Responding'), findsOneWidget);
     expect(find.text('First attempt'), findsOneWidget);
     expect(find.text('Asked for details'), findsOneWidget);
     expect(
       tester.getTopLeft(find.text('First attempt')).dy,
       lessThan(tester.getTopLeft(find.text('Asked for details')).dy),
+    );
+    expect(
+      tester.getTopLeft(find.text('Asked for details')).dy,
+      lessThan(tester.getTopLeft(find.text('Not Responding')).dy),
     );
   });
 
