@@ -661,6 +661,10 @@ abstract interface class AppSettingsStore {
   Future<String> readGeminiApiKey();
 
   Future<void> saveGeminiApiKey(String key);
+
+  Future<String> readGeminiModel();
+
+  Future<void> saveGeminiModel(String model);
 }
 
 class SecureAppSettingsStore implements AppSettingsStore {
@@ -677,6 +681,7 @@ class SecureAppSettingsStore implements AppSettingsStore {
   static const _cachedStudentsKey = 'student_call_cached_students';
   static const _whatsAppTemplatesKey = 'student_call_whatsapp_templates';
   static const _geminiApiKeyKey = 'student_call_gemini_api_key';
+  static const _geminiModelKey = 'student_call_gemini_model';
   final FlutterSecureStorage _storage;
 
   @override
@@ -808,6 +813,14 @@ class SecureAppSettingsStore implements AppSettingsStore {
       _storage.write(key: _geminiApiKeyKey, value: key.trim());
 
   @override
+  Future<String> readGeminiModel() async =>
+      await _storage.read(key: _geminiModelKey) ?? 'gemini-1.5-flash';
+
+  @override
+  Future<void> saveGeminiModel(String model) =>
+      _storage.write(key: _geminiModelKey, value: model.trim());
+
+  @override
   Future<void> saveSheetConfig(String url, {String name = ''}) async {
     final normalizedUrl = url.trim();
     final linkedSheets = await readLinkedSheets();
@@ -931,6 +944,16 @@ class MemoryAppSettingsStore implements AppSettingsStore {
   @override
   Future<void> saveGeminiApiKey(String key) async {
     geminiApiKey = key.trim();
+  }
+
+  String geminiModel = 'gemini-1.5-flash';
+
+  @override
+  Future<String> readGeminiModel() async => geminiModel;
+
+  @override
+  Future<void> saveGeminiModel(String model) async {
+    geminiModel = model.trim();
   }
 }
 
@@ -2764,18 +2787,42 @@ class GeminiException implements Exception {
   String toString() => message;
 }
 
+class GeminiModelInfo {
+  const GeminiModelInfo({
+    required this.id,
+    required this.displayName,
+    this.description = '',
+  });
+
+  final String id;
+  final String displayName;
+  final String description;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is GeminiModelInfo &&
+          runtimeType == other.runtimeType &&
+          id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
+}
+
 class GeminiTestResult {
   const GeminiTestResult({
     required this.isSuccess,
     required this.message,
     this.modelName,
     this.statusCode,
+    this.availableModels = const [],
   });
 
   final bool isSuccess;
   final String message;
   final String? modelName;
   final int? statusCode;
+  final List<GeminiModelInfo> availableModels;
 }
 
 class GeminiService {
@@ -2813,9 +2860,83 @@ class GeminiService {
     return (key.startsWith('AIza') || key.startsWith('AQ.')) && key.length >= 25;
   }
 
+  Future<List<GeminiModelInfo>> fetchAvailableModels(String apiKey) async {
+    final cleanKey = sanitizeApiKey(apiKey);
+    if (cleanKey.isEmpty) return const [];
+
+    for (final apiVersion in ['v1beta', 'v1']) {
+      try {
+        final url = Uri.parse(
+          'https://generativelanguage.googleapis.com/$apiVersion/models?key=$cleanKey',
+        );
+        final response = await _client.get(
+          url,
+          headers: {
+            'Accept': 'application/json',
+            'x-goog-api-key': cleanKey,
+          },
+        ).timeout(const Duration(seconds: 15));
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data is Map && data['models'] is List) {
+            final list = <GeminiModelInfo>[];
+            for (final item in data['models'] as List) {
+              if (item is Map) {
+                final rawName = (item['name'] as String?) ?? '';
+                final methods = (item['supportedGenerationMethods'] as List?)
+                        ?.map((e) => e.toString())
+                        .toList() ??
+                    [];
+                if (methods.isNotEmpty && !methods.contains('generateContent')) {
+                  continue;
+                }
+                final id = rawName.startsWith('models/')
+                    ? rawName.substring(7)
+                    : rawName;
+                if (id.isEmpty) continue;
+                if (id.contains('embedding') ||
+                    id.contains('aqa') ||
+                    id.contains('text-bison') ||
+                    id.contains('chat-bison')) {
+                  continue;
+                }
+                final displayName = (item['displayName'] as String?) ?? id;
+                final description = (item['description'] as String?) ?? '';
+                list.add(GeminiModelInfo(
+                  id: id,
+                  displayName: displayName,
+                  description: description,
+                ));
+              }
+            }
+            if (list.isNotEmpty) {
+              list.sort((a, b) {
+                int score(String id) {
+                  if (id == 'gemini-1.5-flash') return 0;
+                  if (id == 'gemini-2.0-flash') return 1;
+                  if (id.contains('flash')) return 2;
+                  if (id.contains('pro')) return 3;
+                  return 4;
+                }
+                final sA = score(a.id);
+                final sB = score(b.id);
+                if (sA != sB) return sA.compareTo(sB);
+                return a.displayName.compareTo(b.displayName);
+              });
+              return list;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    return const [];
+  }
+
   Future<String> generateFollowUp({
     required String apiKey,
     required Student student,
+    String? model,
     String language = 'Sinhala',
     String tone = 'General Follow-up',
     String customInstructions = '',
@@ -2834,10 +2955,20 @@ class GeminiService {
 
     String? lastError;
 
-    for (final model in candidateModels) {
+    final modelsToTry = <String>[];
+    if (model != null && model.trim().isNotEmpty) {
+      modelsToTry.add(model.trim());
+    }
+    for (final m in candidateModels) {
+      if (!modelsToTry.contains(m)) {
+        modelsToTry.add(m);
+      }
+    }
+
+    for (final targetModel in modelsToTry) {
       try {
         final url = Uri.parse(
-          'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$cleanKey',
+          'https://generativelanguage.googleapis.com/v1beta/models/$targetModel:generateContent?key=$cleanKey',
         );
         final response = await _client.post(
           url,
@@ -2902,7 +3033,7 @@ class GeminiService {
                 'Generative Language API is disabled on this Google project (404).\n\n'
                 'Please open Google AI Studio (aistudio.google.com/app/apikey) and click "Create API key in new project" to get an active free key.';
           } else {
-            lastError = rawApiMessage.isNotEmpty ? rawApiMessage : 'Model $model not found.';
+            lastError = rawApiMessage.isNotEmpty ? rawApiMessage : 'Model $targetModel not found.';
           }
           continue;
         }
@@ -2954,7 +3085,10 @@ class GeminiService {
     );
   }
 
-  Future<GeminiTestResult> testConnection(String apiKey) async {
+  Future<GeminiTestResult> testConnection(
+    String apiKey, {
+    String? targetModel,
+  }) async {
     final cleanKey = sanitizeApiKey(apiKey);
     if (cleanKey.isEmpty) {
       return const GeminiTestResult(
@@ -2963,10 +3097,31 @@ class GeminiService {
       );
     }
 
+    // 1. Discover models accessible to this API key
+    List<GeminiModelInfo> fetchedModels = [];
+    try {
+      fetchedModels = await fetchAvailableModels(cleanKey);
+    } catch (_) {}
+
+    final modelsToPing = <String>[];
+    if (targetModel != null && targetModel.trim().isNotEmpty) {
+      modelsToPing.add(targetModel.trim());
+    }
+    for (final m in fetchedModels) {
+      if (!modelsToPing.contains(m.id)) {
+        modelsToPing.add(m.id);
+      }
+    }
+    for (final m in candidateModels) {
+      if (!modelsToPing.contains(m)) {
+        modelsToPing.add(m);
+      }
+    }
+
     String? lastErrorMessage;
     int? lastStatusCode;
 
-    for (final model in candidateModels) {
+    for (final model in modelsToPing) {
       try {
         final url = Uri.parse(
           'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$cleanKey',
@@ -2994,12 +3149,21 @@ class GeminiService {
         lastStatusCode = response.statusCode;
 
         if (response.statusCode == 200) {
+          final matchedName = fetchedModels
+                  .where((m) => m.id == model)
+                  .firstOrNull
+                  ?.displayName ??
+              model;
+          final modelsCountNote = fetchedModels.isNotEmpty
+              ? '\nFound ${fetchedModels.length} models supported by your API key.'
+              : '';
           return GeminiTestResult(
             isSuccess: true,
             modelName: model,
+            availableModels: fetchedModels,
             statusCode: 200,
             message:
-                '✅ Connection successful!\nConnected to Google Gemini ($model - 100% Free).\nAI messaging is ready to use.',
+                '✅ Connection successful!\nConnected to Google Gemini ($matchedName).$modelsCountNote\nAI messaging is ready to use.',
           );
         }
 
@@ -7196,7 +7360,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.12.4',
+                    'LeadPilot v1.12.5',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,
@@ -8252,20 +8416,43 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
   bool _isTesting = false;
   String? _testResult;
   bool _isSuccess = false;
+  List<GeminiModelInfo> _availableModels = [];
+  String _selectedModel = 'gemini-1.5-flash';
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController();
     _geminiService = widget.geminiService ?? GeminiService();
-    _loadKey();
+    _loadKeyAndModel();
   }
 
-  Future<void> _loadKey() async {
+  Future<void> _loadKeyAndModel() async {
     final key = await widget.settingsStore.readGeminiApiKey();
+    final model = await widget.settingsStore.readGeminiModel();
     if (mounted) {
-      setState(() => _controller.text = key);
+      setState(() {
+        _controller.text = key;
+        _selectedModel = model.isNotEmpty ? model : 'gemini-1.5-flash';
+      });
+      if (key.isNotEmpty) {
+        _fetchModelsQuietly(key);
+      }
     }
+  }
+
+  Future<void> _fetchModelsQuietly(String key) async {
+    try {
+      final models = await _geminiService.fetchAvailableModels(key);
+      if (models.isNotEmpty && mounted) {
+        setState(() {
+          _availableModels = models;
+          if (!_availableModels.any((m) => m.id == _selectedModel)) {
+            _selectedModel = _availableModels.first.id;
+          }
+        });
+      }
+    } catch (_) {}
   }
 
   @override
@@ -8278,9 +8465,16 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
     final cleanKey = GeminiService.sanitizeApiKey(_controller.text);
     _controller.text = cleanKey;
     await widget.settingsStore.saveGeminiApiKey(cleanKey);
+    await widget.settingsStore.saveGeminiModel(_selectedModel);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Gemini API Key saved successfully!')),
+      SnackBar(
+        content: Text(
+          cleanKey.isNotEmpty
+              ? 'Gemini API Key and Model ($_selectedModel) saved successfully!'
+              : 'Gemini settings cleared.',
+        ),
+      ),
     );
     Navigator.pop(context);
   }
@@ -8304,12 +8498,21 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
       _testResult = null;
     });
 
-    final result = await _geminiService.testConnection(cleanKey);
+    final result = await _geminiService.testConnection(
+      cleanKey,
+      targetModel: _selectedModel,
+    );
     if (!mounted) return;
     setState(() {
       _isTesting = false;
       _isSuccess = result.isSuccess;
       _testResult = result.message;
+      if (result.availableModels.isNotEmpty) {
+        _availableModels = result.availableModels;
+        if (!_availableModels.any((m) => m.id == _selectedModel)) {
+          _selectedModel = result.modelName ?? _availableModels.first.id;
+        }
+      }
     });
   }
 
@@ -8497,6 +8700,70 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
                     ),
                 ],
               ),
+              if (_availableModels.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: _availableModels.any((m) => m.id == _selectedModel)
+                      ? _selectedModel
+                      : _availableModels.first.id,
+                  decoration: const InputDecoration(
+                    labelText: 'Selected Gemini Model',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.psychology_rounded),
+                  ),
+                  isExpanded: true,
+                  items: _availableModels.map((info) {
+                    final isFree = info.id.contains('flash');
+                    return DropdownMenuItem<String>(
+                      value: info.id,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              info.displayName,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          if (isFree)
+                            Container(
+                              margin: const EdgeInsets.only(left: 6),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF159A76).withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                'FREE',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF159A76),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (newModel) {
+                    if (newModel != null) {
+                      setState(() => _selectedModel = newModel);
+                    }
+                  },
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '⚡ ${_availableModels.length} models accessible to this key. Select your preferred model.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
               if (_testResult != null) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -8662,9 +8929,11 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
     });
 
     try {
+      final savedModel = await widget.settingsStore.readGeminiModel();
       final result = await _geminiService.generateFollowUp(
         apiKey: _apiKey,
         student: widget.student,
+        model: savedModel,
         language: _selectedLanguage,
         tone: _selectedTone,
         customInstructions: _customInstructionController.text.trim(),

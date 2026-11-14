@@ -2244,7 +2244,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.12.4'), findsOneWidget);
+    expect(find.text('LeadPilot v1.12.5'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -2495,6 +2495,90 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Connection successful'), findsOneWidget);
+  });
+
+  testWidgets(
+      'ManageGeminiAiSheet dynamically fetches models and allows selecting preferred model',
+      (tester) async {
+    final mockClient = MockClient((request) async {
+      if (request.url.path.contains('/models') && request.method == 'GET') {
+        return http.Response(
+          jsonEncode({
+            'models': [
+              {
+                'name': 'models/gemini-1.5-flash',
+                'displayName': 'Gemini 1.5 Flash',
+                'supportedGenerationMethods': ['generateContent'],
+              },
+              {
+                'name': 'models/gemini-2.0-flash',
+                'displayName': 'Gemini 2.0 Flash',
+                'supportedGenerationMethods': ['generateContent'],
+              },
+              {
+                'name': 'models/gemini-1.5-pro',
+                'displayName': 'Gemini 1.5 Pro',
+                'supportedGenerationMethods': ['generateContent'],
+              },
+            ],
+          }),
+          200,
+        );
+      }
+      return http.Response(
+        jsonEncode({
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {'text': 'Ping response'}
+                ]
+              }
+            }
+          ]
+        }),
+        200,
+      );
+    });
+
+    final store = MemoryAppSettingsStore()
+      ..geminiApiKey = 'AIzaSyD1234567890abcdefghijklmnopqrst';
+    final service = GeminiService(client: mockClient);
+
+    // Verify fetchAvailableModels directly
+    final fetched = await service.fetchAvailableModels('AIzaSyD1234567890abcdefghijklmnopqrst');
+    expect(fetched.length, 3);
+    expect(fetched.first.id, 'gemini-1.5-flash');
+    expect(fetched[1].id, 'gemini-2.0-flash');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ManageGeminiAiSheet(
+            settingsStore: store,
+            geminiService: service,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Tap Test Key
+    final testKeyFinder = find.text('Test Key');
+    await tester.ensureVisible(testKeyFinder);
+    await tester.tap(testKeyFinder);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Connection successful'), findsOneWidget);
+    expect(find.text('Selected Gemini Model'), findsOneWidget);
+
+    // Tap Save Key
+    final saveFinder = find.text('Save Key');
+    await tester.ensureVisible(saveFinder);
+    await tester.tap(saveFinder);
+    await tester.pumpAndSettle();
+
+    expect(await store.readGeminiModel(), 'gemini-1.5-flash');
   });
 
   testWidgets(
