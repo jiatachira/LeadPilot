@@ -27,18 +27,19 @@ object CallerIdOverlayManager {
     fun show(context: Context, info: StudentCallerInfo) {
         mainHandler.post {
             try {
-                if (!Settings.canDrawOverlays(context)) {
+                val appContext = context.applicationContext ?: context
+                if (!Settings.canDrawOverlays(appContext)) {
                     Log.w(TAG, "SYSTEM_ALERT_WINDOW permission not granted. Cannot display overlay.")
                     return@post
                 }
 
-                val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+                val windowManager = appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
                     ?: return@post
 
                 // Dismiss any existing overlay first
                 dismissInternal(windowManager)
 
-                val inflater = LayoutInflater.from(context)
+                val inflater = LayoutInflater.from(appContext)
                 val view = inflater.inflate(R.layout.caller_id_overlay, null)
                 overlayView = view
 
@@ -193,7 +194,8 @@ object CallerIdOverlayManager {
     fun dismiss(context: Context) {
         mainHandler.post {
             try {
-                val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+                val appContext = context.applicationContext ?: context
+                val windowManager = appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
                     ?: return@post
                 dismissInternal(windowManager)
             } catch (e: Exception) {

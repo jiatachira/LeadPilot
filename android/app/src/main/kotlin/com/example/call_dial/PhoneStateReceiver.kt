@@ -9,7 +9,7 @@ import android.util.Log
 class PhoneStateReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "PhoneStateReceiver"
-        private var lastState = TelephonyManager.EXTRA_STATE_IDLE
+        private var lastShownNumber: String? = null
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -19,18 +19,17 @@ class PhoneStateReceiver : BroadcastReceiver() {
             return
         }
 
-        if (!CallerIdCacheManager.isCallerIdEnabled(context)) {
+        val appContext = context.applicationContext ?: context
+
+        if (!CallerIdCacheManager.isCallerIdEnabled(appContext)) {
             Log.d(TAG, "Caller ID is disabled in settings. Skipping.")
             return
         }
 
-        val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE) ?: return
-        if (state == lastState) {
-            return
-        }
-        lastState = state
+        val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE)
+        Log.d(TAG, "PhoneStateReceiver received broadcast: action=$action, state=$state")
 
-        Log.d(TAG, "Phone state changed: $state")
+        if (state == null) return
 
         when (state) {
             TelephonyManager.EXTRA_STATE_RINGING -> {
@@ -38,21 +37,38 @@ class PhoneStateReceiver : BroadcastReceiver() {
                 if (incomingNumber.isNullOrEmpty()) {
                     incomingNumber = intent.extras?.getString("incoming_number")
                 }
-                Log.d(TAG, "Incoming ringing call from: $incomingNumber")
+                if (incomingNumber.isNullOrEmpty()) {
+                    incomingNumber = intent.extras?.getString("android.telephony.extra.INCOMING_NUMBER")
+                }
+
+                Log.d(TAG, "EXTRA_STATE_RINGING. Incoming number extracted: '$incomingNumber'")
 
                 if (!incomingNumber.isNullOrEmpty()) {
-                    val student = CallerIdCacheManager.lookupStudent(context, incomingNumber)
-                    if (student != null) {
-                        Log.d(TAG, "Matched student: ${student.name}")
-                        CallerIdOverlayManager.show(context, student)
-                    } else {
-                        Log.d(TAG, "No matching student for: $incomingNumber")
+                    // Prevent duplicate popups for the exact same ringing event
+                    if (incomingNumber == lastShownNumber) {
+                        Log.d(TAG, "Overlay already displayed for $incomingNumber. Skipping duplicate.")
+                        return
                     }
+
+                    val student = CallerIdCacheManager.lookupStudent(appContext, incomingNumber)
+                    if (student != null) {
+                        Log.d(TAG, "Matched student: ${student.name} (${student.phone}). Showing overlay.")
+                        lastShownNumber = incomingNumber
+                        CallerIdOverlayManager.show(appContext, student)
+                    } else {
+                        Log.d(TAG, "No student lead matched for number: $incomingNumber")
+                    }
+                } else {
+                    Log.w(TAG, "Incoming number is null/empty. Check if READ_CALL_LOG permission is granted.")
                 }
             }
             TelephonyManager.EXTRA_STATE_IDLE -> {
-                Log.d(TAG, "Phone is idle, dismissing overlay")
-                CallerIdOverlayManager.dismiss(context)
+                Log.d(TAG, "EXTRA_STATE_IDLE: Phone call ended or idle. Dismissing overlay.")
+                lastShownNumber = null
+                CallerIdOverlayManager.dismiss(appContext)
+            }
+            TelephonyManager.EXTRA_STATE_OFFHOOK -> {
+                Log.d(TAG, "EXTRA_STATE_OFFHOOK: Call answered. Keeping overlay visible for call details.")
             }
         }
     }

@@ -1023,6 +1023,17 @@ class CallerIdService {
       // In tests
     } catch (_) {}
   }
+
+  static Future<int> getCachedCount() async {
+    try {
+      final res = await channel.invokeMethod<int>('getCachedStudentCount');
+      return res ?? 0;
+    } on MissingPluginException {
+      return 0;
+    } catch (_) {
+      return 0;
+    }
+  }
 }
 
 abstract interface class ReminderScheduler {
@@ -3538,6 +3549,7 @@ class _HomeScreenState extends State<HomeScreen> {
         hasActiveFilters: _hasActiveFilters,
         biometricEnabled: widget.biometricEnabled,
         onBiometricChanged: widget.onBiometricChanged,
+        students: _students,
       ),
     );
     if (!mounted || action == null) return;
@@ -6215,6 +6227,7 @@ class _SettingsHubSheet extends StatefulWidget {
     required this.hasActiveFilters,
     required this.biometricEnabled,
     required this.onBiometricChanged,
+    this.students = const [],
   });
 
   final ThemeMode themeMode;
@@ -6223,6 +6236,7 @@ class _SettingsHubSheet extends StatefulWidget {
   final bool hasActiveFilters;
   final bool biometricEnabled;
   final Future<void> Function(bool) onBiometricChanged;
+  final List<Student> students;
 
   @override
   State<_SettingsHubSheet> createState() => _SettingsHubSheetState();
@@ -6230,6 +6244,9 @@ class _SettingsHubSheet extends StatefulWidget {
 
 class _SettingsHubSheetState extends State<_SettingsHubSheet> {
   bool _callerIdEnabled = true;
+  bool _hasOverlayPermission = false;
+  bool _hasPhonePermissions = false;
+  int _cachedCount = 0;
 
   @override
   void initState() {
@@ -6239,53 +6256,73 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
 
   Future<void> _loadCallerIdState() async {
     final enabled = await CallerIdService.isEnabled();
-    if (mounted) {
-      setState(() => _callerIdEnabled = enabled);
+    final hasOverlay = await CallerIdService.canDrawOverlays();
+    final hasPhone = await CallerIdService.hasPhonePermissions();
+    var count = await CallerIdService.getCachedCount();
+    if (count == 0 && widget.students.isNotEmpty) {
+      await CallerIdService.syncStudents(widget.students);
+      count = await CallerIdService.getCachedCount();
     }
+    if (mounted) {
+      setState(() {
+        _callerIdEnabled = enabled;
+        _hasOverlayPermission = hasOverlay;
+        _hasPhonePermissions = hasPhone;
+        _cachedCount = count > 0 ? count : widget.students.length;
+      });
+    }
+  }
+
+  Future<void> _requestPermissions() async {
+    final hasOverlay = await CallerIdService.canDrawOverlays();
+    if (!mounted) return;
+    if (!hasOverlay) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (dialogCtx) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.layers_outlined, color: Color(0xFF62D6B0)),
+              SizedBox(width: 8),
+              Text('Display Over Apps'),
+            ],
+          ),
+          content: const Text(
+            'To show the Caller ID popup when a student calls, LeadPilot needs the "Display over other apps" permission.\n\nPlease enable it on the next screen.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogCtx, true),
+              child: const Text('Grant Permission'),
+            ),
+          ],
+        ),
+      );
+      if (proceed == true) {
+        await CallerIdService.requestOverlayPermission();
+      }
+    }
+
+    final hasPhone = await CallerIdService.hasPhonePermissions();
+    if (!hasPhone) {
+      await CallerIdService.requestPhonePermissions();
+    }
+
+    if (widget.students.isNotEmpty) {
+      await CallerIdService.syncStudents(widget.students);
+    }
+
+    await _loadCallerIdState();
   }
 
   Future<void> _handleCallerIdToggle(bool enable) async {
     if (enable) {
-      final hasOverlay = await CallerIdService.canDrawOverlays();
-      if (!mounted) return;
-      if (!hasOverlay) {
-        final proceed = await showDialog<bool>(
-          context: context,
-          builder: (dialogCtx) => AlertDialog(
-            title: const Row(
-              children: [
-                Icon(Icons.layers_outlined, color: Color(0xFF62D6B0)),
-                SizedBox(width: 8),
-                Text('Display Over Apps'),
-              ],
-            ),
-            content: const Text(
-              'To show the Caller ID popup when a student calls, LeadPilot needs the "Display over other apps" permission.\n\nPlease enable it on the next screen.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogCtx, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(dialogCtx, true),
-                child: const Text('Grant Permission'),
-              ),
-            ],
-          ),
-        );
-        if (proceed == true) {
-          await CallerIdService.requestOverlayPermission();
-        }
-      }
-
-      final hasPhone = await CallerIdService.hasPhonePermissions();
-      if (!hasPhone) {
-        await CallerIdService.requestPhonePermissions();
-      }
-
       await CallerIdService.setEnabled(true);
-      if (mounted) setState(() => _callerIdEnabled = true);
+      await _requestPermissions();
     } else {
       await CallerIdService.setEnabled(false);
       if (mounted) setState(() => _callerIdEnabled = false);
@@ -6294,9 +6331,10 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
 
   Future<void> _testCallerIdPopup() async {
     final hasOverlay = await CallerIdService.canDrawOverlays();
+    final hasPhone = await CallerIdService.hasPhonePermissions();
     if (!mounted) return;
-    if (!hasOverlay) {
-      await _handleCallerIdToggle(true);
+    if (!hasOverlay || !hasPhone) {
+      await _requestPermissions();
       return;
     }
     await CallerIdService.testCallerIdPopup();
@@ -6532,12 +6570,55 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                     SwitchListTile(
                       secondary: const Icon(Icons.phone_in_talk_rounded),
                       title: const Text('Incoming Caller ID Popup'),
-                      subtitle: const Text(
-                        'Show offline student details when a registered lead calls',
+                      subtitle: Text(
+                        _callerIdEnabled
+                            ? (_hasOverlayPermission && _hasPhonePermissions
+                                ? 'Active • $_cachedCount lead(s) cached offline'
+                                : 'Permission required for call detection')
+                            : 'Disabled',
                       ),
                       value: _callerIdEnabled,
                       onChanged: _handleCallerIdToggle,
                     ),
+                    if (_callerIdEnabled && (!_hasOverlayPermission || !_hasPhonePermissions)) ...[
+                      Divider(height: 1, indent: 56, color: theme.colorScheme.outlineVariant),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.warning_amber_rounded, color: Color(0xFFFFAA48), size: 18),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Setup Action Required',
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    color: const Color(0xFFFFAA48),
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              !_hasPhonePermissions
+                                  ? 'Allow Phone & Call Log permission so LeadPilot can detect caller numbers.'
+                                  : 'Allow "Display over other apps" so the popup can show on incoming calls.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            FilledButton.tonalIcon(
+                              icon: const Icon(Icons.lock_open_rounded, size: 16),
+                              label: const Text('Grant Permissions'),
+                              onPressed: _requestPermissions,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     if (_callerIdEnabled) ...[
                       Divider(
                         height: 1,
@@ -6552,6 +6633,33 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                         ),
                         onTap: _testCallerIdPopup,
                       ),
+                      Divider(
+                        height: 1,
+                        indent: 56,
+                        color: theme.colorScheme.outlineVariant,
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.sync_rounded),
+                        title: const Text('Re-sync Leads to Phone'),
+                        subtitle: Text('$_cachedCount student lead(s) stored in phone'),
+                        trailing: TextButton(
+                          onPressed: () async {
+                            if (widget.students.isNotEmpty) {
+                              await CallerIdService.syncStudents(widget.students);
+                              await _loadCallerIdState();
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('${widget.students.length} leads synced for Caller ID!'),
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          child: const Text('Sync'),
+                        ),
+                      ),
                     ],
                   ],
                 ),
@@ -6561,7 +6669,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.11.0',
+                    'LeadPilot v1.11.1',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,

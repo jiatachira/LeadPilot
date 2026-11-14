@@ -2218,12 +2218,13 @@ void main() {
         .setMockMethodCallHandler(CallerIdService.channel, null);
   });
 
-  testWidgets('Settings displays Incoming Caller ID toggle, test popup, and v1.11.0', (tester) async {
+  testWidgets('Settings displays Incoming Caller ID toggle, test popup, and v1.11.1', (tester) async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(CallerIdService.channel, (call) async {
       if (call.method == 'isCallerIdEnabled') return true;
       if (call.method == 'canDrawOverlays') return true;
       if (call.method == 'hasPhonePermissions') return true;
+      if (call.method == 'getCachedStudentCount') return 5;
       return true;
     });
 
@@ -2243,7 +2244,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.11.0'), findsOneWidget);
+    expect(find.text('LeadPilot v1.11.1'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();

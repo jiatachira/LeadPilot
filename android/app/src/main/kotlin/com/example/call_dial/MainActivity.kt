@@ -117,6 +117,9 @@ class MainActivity : FlutterFragmentActivity() {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                                 permissions.add(Manifest.permission.READ_CALL_LOG)
                             }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                permissions.add(Manifest.permission.READ_PHONE_NUMBERS)
+                            }
                             pendingPhonePermissionResult = result
                             ActivityCompat.requestPermissions(
                                 this,
@@ -124,6 +127,9 @@ class MainActivity : FlutterFragmentActivity() {
                                 phonePermissionRequestCode
                             )
                         }
+                    }
+                    "getCachedStudentCount" -> {
+                        result.success(CallerIdCacheManager.getCachedStudentCount(applicationContext))
                     }
                     "testCallerIdPopup" -> {
                         try {
@@ -177,7 +183,7 @@ class MainActivity : FlutterFragmentActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == phonePermissionRequestCode) {
-            val granted = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+            val granted = checkHasPhonePermissions()
             pendingPhonePermissionResult?.success(granted)
             pendingPhonePermissionResult = null
         }
