@@ -3383,8 +3383,8 @@ class GeminiService {
   String _buildPrompt({
     required Student student,
     required String language,
-    required String tone,
-    required String customInstructions,
+    String tone = 'General Follow-up',
+    String customInstructions = '',
   }) {
     final streak = studentActivityStatus(student).unansweredStreak;
     final streakNote = streak >= 3
@@ -3399,6 +3399,10 @@ class GeminiService {
         .where((s) => s.trim().isNotEmpty)
         .join(' ');
 
+    final goalText = customInstructions.trim().isNotEmpty
+        ? customInstructions.trim()
+        : tone;
+
     return '''
 You are a polite, helpful student coordinator / assistant for an educational institute or tutor in Sri Lanka.
 Write a personalized, concise WhatsApp follow-up message to a student lead with the following context:
@@ -3408,16 +3412,15 @@ Write a personalized, concise WhatsApp follow-up message to a student lead with 
 - Call Status: ${student.callStatus}$streakNote
 - Recent Call Note/Comment: "$lastNote"
 - Location/Town: ${student.location.isNotEmpty ? student.location : 'Not specified'}
-- Message Goal/Tone: $tone
+- What the message should be about: "$goalText"
 - Desired Language: $language
-${customInstructions.trim().isNotEmpty ? '- Extra Instruction: "${customInstructions.trim()}"' : ''}
 
 Rules:
 1. Address the student warmly by name.
 2. If Language is "Sinhala", write in natural, polite conversational Sinhala (සිංහල).
 3. If Language is "Singlish", write in natural conversational Sinhala typed in English letters (Singlish).
 4. If Language is "English", write in clear, polite Sri Lankan English.
-5. Directly address the situation from the call note (e.g. if we couldn't connect, or if following up on class fees/details as requested).
+5. Directly address the situation from the call note and the instruction given.
 6. Format nicely for WhatsApp (brief paragraphs, tasteful emojis).
 7. Return ONLY the final message text to be sent directly on WhatsApp. Do not include quotes around the whole text, markdown title/codeblocks, or introductory explanations.
 ''';
@@ -7436,7 +7439,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.12.6',
+                    'LeadPilot v1.12.7',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,
@@ -8939,30 +8942,23 @@ class GeminiAiMessageSheet extends StatefulWidget {
 class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
   late String _apiKey;
   late final TextEditingController _apiKeyController;
-  late final TextEditingController _customInstructionController;
+  late final TextEditingController _instructionController;
   late final TextEditingController _messageController;
   late final GeminiService _geminiService;
 
   String _selectedLanguage = 'Sinhala';
-  String _selectedTone = 'General Follow-up';
   bool _isGenerating = false;
   String? _errorMessage;
   bool _obscureApiKey = true;
 
   final List<String> _languages = const ['Sinhala', 'Singlish', 'English'];
-  final List<String> _tones = const [
-    'General Follow-up',
-    'Missed Call',
-    'Class Details & Fees',
-    'Friendly Reminder',
-  ];
 
   @override
   void initState() {
     super.initState();
     _apiKey = widget.initialApiKey.trim();
     _apiKeyController = TextEditingController(text: _apiKey);
-    _customInstructionController = TextEditingController();
+    _instructionController = TextEditingController();
     _messageController = TextEditingController();
     _geminiService = widget.geminiService ?? GeminiService();
 
@@ -8972,11 +8968,11 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
         st.contains('busy') ||
         st.contains('call cut') ||
         streak >= 2) {
-      _selectedTone = 'Missed Call';
+      _instructionController.text = 'Follow-up regarding missed call';
     } else if (st.contains('interest') || st.contains('register')) {
-      _selectedTone = 'Class Details & Fees';
-    } else if (st.contains('follow') || st.contains('pending')) {
-      _selectedTone = 'General Follow-up';
+      _instructionController.text = 'Follow-up on class details and registration';
+    } else {
+      _instructionController.text = 'General class follow-up';
     }
 
     if (_apiKey.isNotEmpty) {
@@ -8989,7 +8985,7 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
   @override
   void dispose() {
     _apiKeyController.dispose();
-    _customInstructionController.dispose();
+    _instructionController.dispose();
     _messageController.dispose();
     super.dispose();
   }
@@ -9024,8 +9020,7 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
         student: widget.student,
         model: savedModel,
         language: _selectedLanguage,
-        tone: _selectedTone,
-        customInstructions: _customInstructionController.text.trim(),
+        customInstructions: _instructionController.text.trim(),
       );
       if (!mounted) return;
       setState(() {
@@ -9083,7 +9078,10 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
       }
     }
 
-    final defaultTitle = 'AI: $_selectedTone';
+    final promptText = _instructionController.text.trim();
+    final defaultTitle = promptText.isNotEmpty
+        ? 'AI: ${promptText.length > 20 ? "${promptText.substring(0, 20)}..." : promptText}'
+        : 'AI Follow-up';
 
     final newTemplate = await showDialog<WhatsAppTemplate>(
       context: context,
@@ -9353,58 +9351,65 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
                     );
                   }).toList(),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 14),
 
-                // Goal / Tone selector
+                // What to generate input area
                 Text(
-                  'Tone / Purpose:',
+                  'What should this message be about?',
                   style: theme.textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w700,
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  children: _tones.map((tone) {
-                    final selected = _selectedTone == tone;
-                    return ChoiceChip(
-                      label: Text(tone),
-                      selected: selected,
-                      selectedColor: const Color(0xFF8B5CF6).withValues(alpha: 0.2),
-                      labelStyle: TextStyle(
-                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                        color: selected
-                            ? const Color(0xFF8B5CF6)
-                            : theme.colorScheme.onSurface,
-                      ),
-                      onSelected: (val) {
-                        if (val) {
-                          setState(() => _selectedTone = tone);
-                          _generateMessage();
-                        }
-                      },
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 10),
-
-                // Extra Custom Guidance
                 TextField(
-                  controller: _customInstructionController,
-                  decoration: const InputDecoration(
-                    labelText: 'Extra Note / Instruction (Optional)',
-                    hintText: 'e.g. mention class on Sunday 9 AM',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+                  controller: _instructionController,
+                  minLines: 2,
+                  maxLines: 4,
+                  decoration: InputDecoration(
+                    hintText: 'e.g. Follow up on missed call, give fees for A/L 2026 batch...',
+                    border: const OutlineInputBorder(),
+                    prefixIcon: const Padding(
+                      padding: EdgeInsets.only(bottom: 24),
+                      child: Icon(Icons.edit_note_rounded),
+                    ),
+                    suffixIcon: _instructionController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 18),
+                            onPressed: () {
+                              _instructionController.clear();
+                              setState(() {});
+                            },
+                          )
+                        : null,
                   ),
+                  onChanged: (_) => setState(() {}),
                   onSubmitted: (_) => _generateMessage(),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+                FilledButton.icon(
+                  onPressed: _isGenerating ? null : _generateMessage,
+                  icon: _isGenerating
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.auto_awesome_rounded, size: 18),
+                  label: Text(_isGenerating ? 'Generating...' : 'Generate Message'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF8B5CF6),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                ),
 
                 // Error Message if any
                 if (_errorMessage != null) ...[
+                  const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -9419,12 +9424,11 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 10),
                 ],
 
                 // Loading State or Editable Message
                 if (_isGenerating) ...[
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 20),
                   const Center(
                     child: Column(
                       children: [
@@ -9439,8 +9443,9 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 20),
                 ] else if (_messageController.text.trim().isNotEmpty) ...[
+                  const SizedBox(height: 16),
                   Text(
                     'Generated Message (Editable):',
                     style: theme.textTheme.labelMedium?.copyWith(
@@ -9494,15 +9499,6 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       elevation: 2,
-                    ),
-                  ),
-                ] else ...[
-                  FilledButton.icon(
-                    onPressed: _isGenerating ? null : _generateMessage,
-                    icon: const Icon(Icons.auto_awesome_rounded),
-                    label: const Text('Generate Message'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF8B5CF6),
                     ),
                   ),
                 ],

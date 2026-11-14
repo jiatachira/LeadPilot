@@ -2247,7 +2247,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.12.6'), findsOneWidget);
+    expect(find.text('LeadPilot v1.12.7'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -2674,6 +2674,8 @@ void main() {
     expect(find.text('Save Template'), findsOneWidget);
     expect(find.text('Send on WhatsApp'), findsOneWidget);
     expect(find.text('Regenerate'), findsOneWidget);
+    expect(find.text('Generate Message'), findsOneWidget);
+    expect(find.text('What should this message be about?'), findsOneWidget);
 
     await tester.ensureVisible(find.text('Save Template'));
     await tester.pumpAndSettle();
