@@ -185,6 +185,8 @@ void main() {
     expect(isFinalLeadStatus('Not Potential'), isTrue);
     expect(isFinalLeadStatus('Not Protencial'), isTrue);
     expect(isFinalLeadStatus('Not Pretencial'), isTrue);
+    expect(isInactiveStatus('Inactive'), isTrue);
+    expect(isFinalLeadStatus('Inactive'), isTrue);
     expect(isFinalLeadStatus('Interested'), isFalse);
   });
 
@@ -1980,6 +1982,130 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Select Template'), findsNothing);
+    },
+  );
+
+  test(
+    'calculates consecutive unanswered streak correctly and resets on answer',
+    () {
+      final now = DateTime.now();
+      final student3 = Student(
+        name: 'Lead 3x',
+        phone: '0711111111',
+        attempts: [
+          CallAttempt(
+            dateTime: now.subtract(const Duration(hours: 5)).toIso8601String(),
+            status: 'Answered',
+            comment: 'Talked',
+          ),
+          CallAttempt(
+            dateTime: now.subtract(const Duration(hours: 3)).toIso8601String(),
+            status: 'No Answer',
+            comment: '',
+          ),
+          CallAttempt(
+            dateTime: now.subtract(const Duration(hours: 2)).toIso8601String(),
+            status: 'Call Cut',
+            comment: '',
+          ),
+          CallAttempt(
+            dateTime: now.subtract(const Duration(hours: 1)).toIso8601String(),
+            status: 'Not Responding',
+            comment: '',
+          ),
+        ],
+      );
+
+      final status3 = studentActivityStatus(student3);
+      expect(status3.unansweredStreak, 3);
+      expect(status3.level, StudentActivityLevel.cooling);
+
+      final student5 = student3.copyWith(
+        attempts: [
+          ...student3.attempts,
+          CallAttempt(
+            dateTime: now.subtract(const Duration(minutes: 30)).toIso8601String(),
+            status: 'Line Busy',
+            comment: '',
+          ),
+          CallAttempt(
+            dateTime: now.subtract(const Duration(minutes: 10)).toIso8601String(),
+            status: 'No Answer',
+            comment: '',
+          ),
+        ],
+      );
+
+      final status5 = studentActivityStatus(student5);
+      expect(status5.unansweredStreak, 5);
+      expect(status5.level, StudentActivityLevel.inactive);
+    },
+  );
+
+  testWidgets(
+    'prompts to move lead to Inactive on 6th consecutive unanswered attempt',
+    (tester) async {
+      final now = DateTime.now();
+      final fiveAttemptStudent = {
+        'name': 'Kamal Perera',
+        'contact': '0701061244',
+        'addedDate': now.toIso8601String(),
+        'callStatus': 'No Answer',
+        'comment': '',
+        'attempts': [
+          for (int i = 5; i >= 1; i--)
+            {
+              'dateTime': now.subtract(Duration(hours: i)).toIso8601String(),
+              'status': 'No Answer',
+              'comment': '',
+            },
+        ],
+      };
+
+      final client = MockClient((request) async {
+        if (request.method == 'GET') {
+          return http.Response(
+            jsonEncode({
+              'students': [fiveAttemptStudent],
+            }),
+            200,
+          );
+        }
+        return http.Response('{"success":true}', 200);
+      });
+
+      final settingsStore = MemoryAppSettingsStore()
+        ..pin = '2580'
+        ..sheetConfig = 'https://script.google.com/macros/s/test/exec';
+
+      await tester.pumpWidget(
+        testApp(httpClient: client, settingsStore: settingsStore),
+      );
+      await tester.pumpAndSettle();
+      await enterPin(tester, '2580');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Kamal Perera'), findsOneWidget);
+      expect(find.text('🚨 5x No Answer'), findsOneWidget);
+
+      await tester.tap(find.text('Kamal Perera'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Update Details'), findsOneWidget);
+      await tester.ensureVisible(find.text('Update Details'));
+      await tester.tap(find.text('Update Details'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Move to Inactive?'), findsOneWidget);
+      expect(
+        find.textContaining('Kamal Perera has not answered 6 consecutive times.'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('Move to Inactive'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Kamal Perera'), findsNothing);
     },
   );
 }

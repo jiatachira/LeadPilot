@@ -144,19 +144,26 @@ bool isNotPotentialStatus(String status) {
   };
 }
 
+bool isInactiveStatus(String status) =>
+    status.trim().toLowerCase() == 'inactive';
+
 bool isFinalLeadStatus(String status) =>
-    isNotInterestedStatus(status) || isNotPotentialStatus(status);
+    isNotInterestedStatus(status) ||
+    isNotPotentialStatus(status) ||
+    isInactiveStatus(status);
 
 enum StudentActivityLevel { active, cooling, inactive, unknown }
 
 class StudentActivityStatus {
   const StudentActivityStatus({
     required this.level,
+    this.unansweredStreak = 0,
     required this.daysSinceConnection,
     required this.hasSuccessfulConnection,
   });
 
   final StudentActivityLevel level;
+  final int unansweredStreak;
   final int? daysSinceConnection;
   final bool hasSuccessfulConnection;
 
@@ -169,20 +176,26 @@ class StudentActivityStatus {
 
   String get label => switch (level) {
     StudentActivityLevel.active => 'Active',
-    StudentActivityLevel.cooling => '${daysSinceConnection}d',
-    StudentActivityLevel.inactive => '${daysSinceConnection}d',
+    StudentActivityLevel.cooling =>
+      unansweredStreak > 0 ? '${unansweredStreak}x No answer' : '${daysSinceConnection}d',
+    StudentActivityLevel.inactive =>
+      unansweredStreak > 0 ? '${unansweredStreak}x No answer' : '${daysSinceConnection}d',
     StudentActivityLevel.unknown => 'No calls',
   };
 
   String get description => switch (level) {
     StudentActivityLevel.active =>
       hasSuccessfulConnection
-          ? 'Connected within the last 2 days'
+          ? 'Connected recently'
           : 'Call attempt within the last 2 days',
     StudentActivityLevel.cooling =>
-      'No connection for $daysSinceConnection days',
+      unansweredStreak > 0
+          ? '$unansweredStreak consecutive unanswered calls'
+          : 'No connection for $daysSinceConnection days',
     StudentActivityLevel.inactive =>
-      'No connection for $daysSinceConnection days',
+      unansweredStreak > 0
+          ? '$unansweredStreak consecutive unanswered calls'
+          : 'No connection for $daysSinceConnection days',
     StudentActivityLevel.unknown => 'No call history yet',
   };
 }
@@ -190,39 +203,97 @@ class StudentActivityStatus {
 StudentActivityStatus studentActivityStatus(Student student, {DateTime? now}) {
   final failedConnectionDates = <DateTime>[];
   final successfulConnectionDates = <DateTime>[];
+  final callEvents = <({DateTime? date, String status, String comment})>[];
+  final seenComments = <String>{};
 
   for (final attempt in student.attempts) {
     final date = DateTime.tryParse(attempt.dateTime);
-    if (date == null) continue;
-    if (_isUnansweredCall(attempt.status, attempt.comment)) {
-      failedConnectionDates.add(date);
-    } else if (_isConnectedCall(attempt.status)) {
-      successfulConnectionDates.add(date);
+    final comment = attempt.comment.trim();
+    if (comment.isNotEmpty) seenComments.add(comment.toLowerCase());
+    if (date != null) {
+      if (_isUnansweredCall(attempt.status, attempt.comment)) {
+        failedConnectionDates.add(date);
+      } else if (_isConnectedCall(attempt.status)) {
+        successfulConnectionDates.add(date);
+      }
     }
+    callEvents.add((
+      date: date,
+      status: attempt.status,
+      comment: attempt.comment,
+    ));
   }
 
   for (final entry in student.commentHistory) {
     final separator = entry.indexOf(' — ');
-    if (separator < 0) {
-      if (_isUnansweredCall('', entry)) {
-        final date = DateTime.tryParse(student.addedDate);
-        if (date != null) failedConnectionDates.add(date);
+    final comment = separator < 0
+        ? entry.trim()
+        : entry.substring(separator + 3).trim();
+    if (comment.isEmpty) continue;
+    if (seenComments.contains(comment.toLowerCase())) continue;
+    seenComments.add(comment.toLowerCase());
+
+    final date = separator < 0
+        ? DateTime.tryParse(student.addedDate)
+        : _parseActivityDate(entry.substring(0, separator).trim());
+
+    if (date != null) {
+      if (_isUnansweredCall('', comment)) {
+        failedConnectionDates.add(date);
       }
-      continue;
     }
-    final comment = entry.substring(separator + 3).trim();
-    if (!_isUnansweredCall('', comment)) continue;
-    final date = _parseActivityDate(entry.substring(0, separator).trim());
-    if (date != null) failedConnectionDates.add(date);
+    callEvents.add((
+      date: date,
+      status: '',
+      comment: comment,
+    ));
   }
 
   if (student.attempts.isEmpty && student.commentHistory.isEmpty) {
     final date = DateTime.tryParse(student.addedDate);
-    if (_isUnansweredCall(student.callStatus, student.comment) &&
-        date != null) {
-      failedConnectionDates.add(date);
-    } else if (_isConnectedCall(student.callStatus) && date != null) {
-      successfulConnectionDates.add(date);
+    if (_isUnansweredCall(student.callStatus, student.comment)) {
+      if (date != null) failedConnectionDates.add(date);
+      callEvents.add((
+        date: date,
+        status: student.callStatus,
+        comment: student.comment,
+      ));
+    } else if (_isConnectedCall(student.callStatus)) {
+      if (date != null) successfulConnectionDates.add(date);
+      callEvents.add((
+        date: date,
+        status: student.callStatus,
+        comment: student.comment,
+      ));
+    }
+  }
+
+  if (callEvents.isEmpty &&
+      failedConnectionDates.isEmpty &&
+      successfulConnectionDates.isEmpty) {
+    return const StudentActivityStatus(
+      level: StudentActivityLevel.unknown,
+      unansweredStreak: 0,
+      daysSinceConnection: null,
+      hasSuccessfulConnection: false,
+    );
+  }
+
+  callEvents.sort((a, b) {
+    if (a.date != null && b.date != null) {
+      return a.date!.compareTo(b.date!);
+    }
+    return 0;
+  });
+
+  int unansweredStreak = 0;
+  for (final event in callEvents.reversed) {
+    if (_isUnansweredCall(event.status, event.comment)) {
+      unansweredStreak++;
+    } else if (_isConnectedCall(event.status)) {
+      break;
+    } else {
+      break;
     }
   }
 
@@ -237,27 +308,32 @@ StudentActivityStatus studentActivityStatus(Student student, {DateTime? now}) {
     );
   }
 
-  if (lastConnection == null) {
-    return const StudentActivityStatus(
-      level: StudentActivityLevel.unknown,
-      daysSinceConnection: null,
-      hasSuccessfulConnection: false,
-    );
+  int? days;
+  if (lastConnection != null) {
+    final currentDate = _dateOnly(now ?? DateTime.now());
+    final connectionDate = _dateOnly(lastConnection);
+    days = currentDate
+        .difference(connectionDate)
+        .inDays
+        .clamp(0, 100000)
+        .toInt();
   }
 
-  final currentDate = _dateOnly(now ?? DateTime.now());
-  final connectionDate = _dateOnly(lastConnection);
-  final days = currentDate
-      .difference(connectionDate)
-      .inDays
-      .clamp(0, 100000)
-      .toInt();
+  final effectiveDays = days ?? 0;
+  final StudentActivityLevel level;
+  if (unansweredStreak >= 5 || (lastConnection != null && effectiveDays >= 5)) {
+    level = StudentActivityLevel.inactive;
+  } else if (unansweredStreak >= 3 || (lastConnection != null && effectiveDays >= 3)) {
+    level = StudentActivityLevel.cooling;
+  } else if (successfulConnectionDates.isNotEmpty || callEvents.isNotEmpty) {
+    level = StudentActivityLevel.active;
+  } else {
+    level = StudentActivityLevel.unknown;
+  }
+
   return StudentActivityStatus(
-    level: days >= 5
-        ? StudentActivityLevel.inactive
-        : days >= 3
-        ? StudentActivityLevel.cooling
-        : StudentActivityLevel.active,
+    level: level,
+    unansweredStreak: unansweredStreak,
     daysSinceConnection: days,
     hasSuccessfulConnection: successfulConnectionDates.isNotEmpty,
   );
@@ -288,6 +364,8 @@ bool _isConnectedCall(String status) => const {
   'interested',
   'minimal interested',
   'not interested',
+  'not potential',
+  'inactive',
   'call back',
   'future',
 }.contains(status.trim().toLowerCase());
@@ -2523,7 +2601,7 @@ enum _SettingsAction {
 
 enum _StudentCardAction { edit, selectMultiple }
 
-enum _LeadReportAction { notInterested, notPotential }
+enum _LeadReportAction { notInterested, notPotential, inactive }
 
 class SheetApiException implements Exception {
   const SheetApiException(this.message);
@@ -2906,10 +2984,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<Student> get _filteredStudents {
     final query = _query.trim().toLowerCase();
+    final statusFilter = _statusFilter?.trim().toLowerCase();
     final filtered = _students
         .where(
           (student) =>
-              !isFinalLeadStatus(student.callStatus) &&
+              (!isFinalLeadStatus(student.callStatus) ||
+                  (statusFilter != null &&
+                      statusFilter ==
+                          student.callStatus.trim().toLowerCase())) &&
               _matchesLeadFilter(student) &&
               (query.isEmpty || _matchesSearch(student, query)),
         )
@@ -3423,6 +3505,9 @@ class _HomeScreenState extends State<HomeScreen> {
         notPotentialCount: _students
             .where((student) => isNotPotentialStatus(student.callStatus))
             .length,
+        inactiveCount: _students
+            .where((student) => isInactiveStatus(student.callStatus))
+            .length,
       ),
     );
     if (!mounted || action == null) return;
@@ -3444,6 +3529,15 @@ class _HomeScreenState extends State<HomeScreen> {
               .toList(),
           fileName: 'not_potential_students.csv',
           title: 'Not Potential report',
+          emptyMessage: 'There are no students in this report to export.',
+        );
+      case _LeadReportAction.inactive:
+        await _exportStudentsToCsv(
+          _students
+              .where((student) => isInactiveStatus(student.callStatus))
+              .toList(),
+          fileName: 'inactive_students.csv',
+          title: 'Inactive report',
           emptyMessage: 'There are no students in this report to export.',
         );
     }
@@ -4310,6 +4404,7 @@ class _LeadFilterSheetState extends State<_LeadFilterSheet> {
     'Very Interested',
     'Interested',
     'Minimal Interested',
+    'Inactive',
     'Answered',
     'No Answer',
     'Not Responding',
@@ -4734,6 +4829,14 @@ class StudentCard extends StatelessWidget {
                                 background: statusColor.withValues(alpha: 0.12),
                                 foreground: statusColor,
                               ),
+                            if (activity.unansweredStreak >= 3)
+                              _StudentTag(
+                                text: activity.unansweredStreak >= 5
+                                    ? '🚨 ${activity.unansweredStreak}x No Answer'
+                                    : '⚠️ ${activity.unansweredStreak}x No Answer',
+                                background: activity.color.withValues(alpha: 0.15),
+                                foreground: activity.color,
+                              ),
                             if (DateTime.tryParse(student.nextCallDateTime)
                                 case final reminder?)
                               _StudentTag(
@@ -5114,6 +5217,7 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
     'Minimal Interested',
     'Not Interested',
     'Not Potential',
+    'Inactive',
     'Answered',
     'No Answer',
     'Not Responding',
@@ -5558,9 +5662,58 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
                 SizedBox(
                   height: 52,
                   child: ElevatedButton.icon(
-                    onPressed: () {
+                    onPressed: () async {
                       if (!_formKey.currentState!.validate()) return;
-                      Navigator.of(context).pop(_updatedStudent());
+                      final updated = _updatedStudent();
+                      final currentStreak =
+                          studentActivityStatus(widget.student).unansweredStreak;
+                      final isNewAttemptUnanswered = _isUnansweredCall(
+                        updated.callStatus,
+                        updated.comment,
+                      );
+
+                      if (currentStreak >= 5 && isNewAttemptUnanswered) {
+                        final nextStreak = currentStreak + 1;
+                        final moveToInactive = await showDialog<bool>(
+                          context: context,
+                          builder: (dialogCtx) => AlertDialog(
+                            title: const Text('Move to Inactive?'),
+                            content: Text(
+                              '${widget.student.name} has not answered $nextStreak consecutive times. Move to \'Inactive\'?',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.pop(dialogCtx, false),
+                                child: const Text('Keep Active'),
+                              ),
+                              FilledButton(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor:
+                                      Theme.of(context).colorScheme.error,
+                                ),
+                                onPressed: () => Navigator.pop(dialogCtx, true),
+                                child: const Text('Move to Inactive'),
+                              ),
+                            ],
+                          ),
+                        );
+
+                        if (moveToInactive == true) {
+                          final inactiveStudent = updated.copyWith(
+                            callStatus: 'Inactive',
+                            nextCallDateTime: '',
+                          );
+                          if (context.mounted) {
+                            Navigator.of(context).pop(inactiveStudent);
+                          }
+                          return;
+                        }
+                      }
+
+                      if (context.mounted) {
+                        Navigator.of(context).pop(updated);
+                      }
                     },
                     icon: const Icon(Icons.save_outlined),
                     label: const Text('Update Details'),
@@ -5794,10 +5947,12 @@ class _LeadReportsSheet extends StatelessWidget {
   const _LeadReportsSheet({
     required this.notInterestedCount,
     required this.notPotentialCount,
+    required this.inactiveCount,
   });
 
   final int notInterestedCount;
   final int notPotentialCount;
+  final int inactiveCount;
 
   @override
   Widget build(BuildContext context) {
@@ -5863,6 +6018,17 @@ class _LeadReportsSheet extends StatelessWidget {
                     title: 'Not Potential',
                     count: notPotentialCount,
                     action: _LeadReportAction.notPotential,
+                  ),
+                  Divider(
+                    height: 1,
+                    indent: 56,
+                    color: theme.colorScheme.outlineVariant,
+                  ),
+                  _reportTile(
+                    context,
+                    title: 'Inactive (Unreachable)',
+                    count: inactiveCount,
+                    action: _LeadReportAction.inactive,
                   ),
                 ],
               ),
