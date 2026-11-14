@@ -2244,7 +2244,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.12.1'), findsOneWidget);
+    expect(find.text('LeadPilot v1.12.2'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -2473,5 +2473,79 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Connection successful'), findsOneWidget);
+  });
+
+  testWidgets(
+      'GeminiAiMessageSheet allows saving generated message as a reusable template',
+      (tester) async {
+    final mockClient = MockClient((request) async {
+      return http.Response(
+        jsonEncode({
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {
+                    'text':
+                        'Hello Nimal, your tuition class starts next Monday!'
+                  }
+                ]
+              }
+            }
+          ]
+        }),
+        200,
+      );
+    });
+
+    final store = MemoryAppSettingsStore()
+      ..geminiApiKey = 'AIzaSyD1234567890abcdefghijklmnopqrst';
+    final service = GeminiService(client: mockClient);
+
+    const student = Student(
+      name: 'Nimal Silva',
+      phone: '0771234567',
+      callStatus: 'Interested',
+      examType: '2026 A/L',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: GeminiAiMessageSheet(
+            student: student,
+            initialApiKey: 'AIzaSyD1234567890abcdefghijklmnopqrst',
+            settingsStore: store,
+            geminiService: service,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Save Template'), findsOneWidget);
+    expect(find.text('Send on WhatsApp'), findsOneWidget);
+    expect(find.text('Regenerate'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Save Template'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save Template'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Save as Template'), findsOneWidget);
+    expect(
+      find.text('Hello {name}, your tuition class starts next Monday!'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final templates = await store.readWhatsAppTemplates();
+    expect(
+      templates.any((t) =>
+          t.message == 'Hello {name}, your tuition class starts next Monday!'),
+      isTrue,
+    );
   });
 }

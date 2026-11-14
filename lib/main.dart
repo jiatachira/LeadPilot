@@ -7120,7 +7120,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.12.1',
+                    'LeadPilot v1.12.2',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,
@@ -7772,9 +7772,15 @@ class _WhatsAppTemplatePickerSheet extends StatelessWidget {
 }
 
 class _TemplateEditorDialog extends StatefulWidget {
-  const _TemplateEditorDialog({this.template});
+  const _TemplateEditorDialog({
+    this.template,
+    this.initialName,
+    this.initialMessage,
+  });
 
   final WhatsAppTemplate? template;
+  final String? initialName;
+  final String? initialMessage;
 
   @override
   State<_TemplateEditorDialog> createState() => _TemplateEditorDialogState();
@@ -7788,9 +7794,12 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
   @override
   void initState() {
     super.initState();
-    _nameController = TextEditingController(text: widget.template?.name ?? '');
-    _messageController =
-        TextEditingController(text: widget.template?.message ?? '');
+    _nameController = TextEditingController(
+      text: widget.template?.name ?? widget.initialName ?? '',
+    );
+    _messageController = TextEditingController(
+      text: widget.template?.message ?? widget.initialMessage ?? '',
+    );
   }
 
   @override
@@ -7803,7 +7812,13 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.template == null ? 'Add Template' : 'Edit Template'),
+      title: Text(
+        widget.template != null
+            ? 'Edit Template'
+            : (widget.initialMessage != null
+                ? 'Save as Template'
+                : 'Add Template'),
+      ),
       content: Form(
         key: _formKey,
         child: SingleChildScrollView(
@@ -8619,6 +8634,46 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
     );
   }
 
+  Future<void> _saveAsTemplate() async {
+    final currentText = _messageController.text.trim();
+    if (currentText.isEmpty) return;
+
+    var templateMsg = currentText;
+    final sName = widget.student.name.trim();
+    if (sName.isNotEmpty && templateMsg.contains(sName)) {
+      templateMsg = templateMsg.replaceFirst(sName, '{name}');
+    } else if (sName.isNotEmpty) {
+      final firstName = sName.split(RegExp(r'\s+')).first;
+      if (firstName.length >= 3 && templateMsg.contains(firstName)) {
+        templateMsg = templateMsg.replaceFirst(firstName, '{name}');
+      }
+    }
+
+    final defaultTitle = 'AI: $_selectedTone';
+
+    final newTemplate = await showDialog<WhatsAppTemplate>(
+      context: context,
+      builder: (_) => _TemplateEditorDialog(
+        initialName: defaultTitle,
+        initialMessage: templateMsg,
+      ),
+    );
+
+    if (newTemplate != null && mounted) {
+      final list = await widget.settingsStore.readWhatsAppTemplates();
+      final updated = List<WhatsAppTemplate>.from(list)..add(newTemplate);
+      await widget.settingsStore.saveWhatsAppTemplates(updated);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Saved "${newTemplate.name}" to WhatsApp Templates!'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -8971,10 +9026,20 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
                   const SizedBox(height: 14),
                   Row(
                     children: [
-                      OutlinedButton.icon(
-                        onPressed: _isGenerating ? null : _generateMessage,
-                        icon: const Icon(Icons.refresh_rounded, size: 18),
-                        label: const Text('Regenerate'),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _isGenerating ? null : _generateMessage,
+                          icon: const Icon(Icons.refresh_rounded, size: 16),
+                          label: const Text('Regenerate'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _saveAsTemplate,
+                          icon: const Icon(Icons.bookmark_add_outlined, size: 16),
+                          label: const Text('Save Template'),
+                        ),
                       ),
                       const SizedBox(width: 8),
                       IconButton.outlined(
@@ -8982,19 +9047,20 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
                         icon: const Icon(Icons.copy_rounded, size: 18),
                         tooltip: 'Copy text',
                       ),
-                      const Spacer(),
-                      ElevatedButton.icon(
-                        onPressed: () =>
-                            Navigator.pop(context, _messageController.text),
-                        icon: const FaIcon(FontAwesomeIcons.whatsapp, size: 18),
-                        label: const Text('Send on WhatsApp'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF25D366),
-                          foregroundColor: Colors.white,
-                          elevation: 2,
-                        ),
-                      ),
                     ],
+                  ),
+                  const SizedBox(height: 10),
+                  ElevatedButton.icon(
+                    onPressed: () =>
+                        Navigator.pop(context, _messageController.text),
+                    icon: const FaIcon(FontAwesomeIcons.whatsapp, size: 18),
+                    label: const Text('Send on WhatsApp'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF25D366),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      elevation: 2,
+                    ),
                   ),
                 ] else ...[
                   FilledButton.icon(
