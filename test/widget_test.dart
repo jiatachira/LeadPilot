@@ -1751,8 +1751,11 @@ void main() {
     'auto-schedules unscheduled today follow-up reminders when syncing',
     (tester) async {
       final now = DateTime.now();
-      final todayFutureCall = now.add(const Duration(hours: 2));
-      final alreadyScheduledCall = now.add(const Duration(hours: 3));
+      final endOfToday = DateTime(now.year, now.month, now.day + 1);
+      final remainingMs = endOfToday.difference(now).inMilliseconds;
+      final stepMs = (remainingMs / 4).clamp(1000, 3600000).toInt();
+      final todayFutureCall = now.add(Duration(milliseconds: stepMs));
+      final alreadyScheduledCall = now.add(Duration(milliseconds: stepMs * 2));
 
       final reminderScheduler = FakeReminderScheduler();
       final alreadyScheduledStudent = Student(
@@ -2244,7 +2247,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.12.5'), findsOneWidget);
+    expect(find.text('LeadPilot v1.12.6'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -2452,6 +2455,45 @@ void main() {
     expect(disabledRes.statusCode, 404);
     expect(disabledRes.message.contains('Generative Language API is disabled'), isTrue);
     expect(disabledRes.message.contains('Create API key in new project'), isTrue);
+
+    // Test modality mismatch fallback (e.g. gemini-2.5-flash-preview-tts returns 400 modalities, gemini-1.5-flash returns 200)
+    final modalityFallbackClient = MockClient((request) async {
+      if (request.url.path.contains('gemini-2.5-flash-preview-tts')) {
+        return http.Response(
+          jsonEncode({
+            'error': {
+              'code': 400,
+              'message':
+                  'The requested combination of response modalities (TEXT) is not supported by the model. models/gemini-2.5-flash-preview-tts accepts AUDIO',
+              'status': 'INVALID_ARGUMENT',
+            }
+          }),
+          400,
+        );
+      }
+      return http.Response(
+        jsonEncode({
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {'text': 'pong'}
+                ]
+              }
+            }
+          ]
+        }),
+        200,
+      );
+    });
+
+    final fallbackService = GeminiService(client: modalityFallbackClient);
+    final fallbackRes = await fallbackService.testConnection(
+      'AIzaSyD1234567890abcdefghijklmnopqrst',
+      targetModel: 'gemini-2.5-flash-preview-tts',
+    );
+    expect(fallbackRes.isSuccess, isTrue);
+    expect(fallbackRes.modelName, 'gemini-1.5-flash');
   });
 
   testWidgets('ManageGeminiAiSheet tests key and displays connection feedback', (tester) async {

@@ -2835,6 +2835,30 @@ class GeminiService {
     'gemini-1.5-flash',
     'gemini-2.0-flash',
     'gemini-1.5-flash-8b',
+    'gemini-1.5-pro',
+  ];
+
+  static const List<GeminiModelInfo> defaultModels = [
+    GeminiModelInfo(
+      id: 'gemini-1.5-flash',
+      displayName: 'Gemini 1.5 Flash (Recommended - 100% Free)',
+      description: 'Fast, versatile, and generous free tier (1,500 requests/day)',
+    ),
+    GeminiModelInfo(
+      id: 'gemini-2.0-flash',
+      displayName: 'Gemini 2.0 Flash (Next-Gen Fast)',
+      description: 'Ultra-fast next generation model',
+    ),
+    GeminiModelInfo(
+      id: 'gemini-1.5-flash-8b',
+      displayName: 'Gemini 1.5 Flash 8B (High Speed)',
+      description: 'Lightweight model built for maximum throughput',
+    ),
+    GeminiModelInfo(
+      id: 'gemini-1.5-pro',
+      displayName: 'Gemini 1.5 Pro (Advanced Reasoning)',
+      description: 'High capacity model for complex queries',
+    ),
   ];
 
   static String sanitizeApiKey(String raw) {
@@ -2895,14 +2919,31 @@ class GeminiService {
                     ? rawName.substring(7)
                     : rawName;
                 if (id.isEmpty) continue;
-                if (id.contains('embedding') ||
-                    id.contains('aqa') ||
-                    id.contains('text-bison') ||
-                    id.contains('chat-bison')) {
-                  continue;
-                }
                 final displayName = (item['displayName'] as String?) ?? id;
                 final description = (item['description'] as String?) ?? '';
+
+                final lowerId = id.toLowerCase();
+                final lowerDisplay = displayName.toLowerCase();
+                final lowerDesc = description.toLowerCase();
+
+                // Exclude models that do not produce standard text response
+                if (lowerId.contains('embedding') ||
+                    lowerId.contains('embed') ||
+                    lowerId.contains('aqa') ||
+                    lowerId.contains('text-bison') ||
+                    lowerId.contains('chat-bison') ||
+                    lowerId.contains('tts') ||
+                    lowerId.contains('audio') ||
+                    lowerId.contains('realtime') ||
+                    lowerId.contains('imagen') ||
+                    lowerId.contains('image') ||
+                    lowerId.contains('vision') ||
+                    lowerDesc.contains('audio') ||
+                    lowerDesc.contains('speech') ||
+                    lowerDisplay.contains('tts')) {
+                  continue;
+                }
+
                 list.add(GeminiModelInfo(
                   id: id,
                   displayName: displayName,
@@ -2913,12 +2954,23 @@ class GeminiService {
             if (list.isNotEmpty) {
               list.sort((a, b) {
                 int score(String id) {
-                  if (id == 'gemini-1.5-flash') return 0;
-                  if (id == 'gemini-2.0-flash') return 1;
-                  if (id.contains('flash')) return 2;
-                  if (id.contains('pro')) return 3;
-                  return 4;
+                  final lower = id.toLowerCase();
+                  if (lower == 'gemini-1.5-flash') return 0;
+                  if (lower == 'gemini-2.0-flash') return 1;
+                  if (lower == 'gemini-1.5-flash-8b') return 2;
+                  if (lower.contains('1.5-flash')) return 3;
+                  if (lower.contains('2.0-flash')) return 4;
+                  if (lower.contains('flash') &&
+                      !lower.contains('preview') &&
+                      !lower.contains('exp')) {
+                    return 5;
+                  }
+                  if (lower.contains('flash')) return 6;
+                  if (lower == 'gemini-1.5-pro') return 7;
+                  if (lower.contains('pro')) return 8;
+                  return 9;
                 }
+
                 final sA = score(a.id);
                 final sB = score(b.id);
                 if (sA != sB) return sA.compareTo(sB);
@@ -3024,7 +3076,14 @@ class GeminiService {
           }
         } catch (_) {}
 
-        if (response.statusCode == 404) {
+        final isModelIncompatible = response.statusCode == 404 ||
+            (response.statusCode == 400 &&
+                (rawApiMessage.toLowerCase().contains('modalities') ||
+                    rawApiMessage.toLowerCase().contains('not supported by the model') ||
+                    rawApiMessage.toLowerCase().contains('not found') ||
+                    rawApiMessage.toLowerCase().contains('unsupported for generatecontent')));
+
+        if (isModelIncompatible) {
           final isApiDisabled = rawApiMessage.contains('is not found for API version') ||
               rawApiMessage.contains('not supported for generateContent') ||
               rawApiMessage.contains('ListModels');
@@ -3033,7 +3092,7 @@ class GeminiService {
                 'Generative Language API is disabled on this Google project (404).\n\n'
                 'Please open Google AI Studio (aistudio.google.com/app/apikey) and click "Create API key in new project" to get an active free key.';
           } else {
-            lastError = rawApiMessage.isNotEmpty ? rawApiMessage : 'Model $targetModel not found.';
+            lastError = rawApiMessage.isNotEmpty ? rawApiMessage : 'Model $targetModel not supported.';
           }
           continue;
         }
@@ -3094,6 +3153,7 @@ class GeminiService {
       return const GeminiTestResult(
         isSuccess: false,
         message: 'API Key is empty. Please enter your Gemini API key.',
+        availableModels: defaultModels,
       );
     }
 
@@ -3103,11 +3163,13 @@ class GeminiService {
       fetchedModels = await fetchAvailableModels(cleanKey);
     } catch (_) {}
 
+    final availableList = fetchedModels.isNotEmpty ? fetchedModels : defaultModels;
+
     final modelsToPing = <String>[];
     if (targetModel != null && targetModel.trim().isNotEmpty) {
       modelsToPing.add(targetModel.trim());
     }
-    for (final m in fetchedModels) {
+    for (final m in availableList) {
       if (!modelsToPing.contains(m.id)) {
         modelsToPing.add(m.id);
       }
@@ -3149,7 +3211,7 @@ class GeminiService {
         lastStatusCode = response.statusCode;
 
         if (response.statusCode == 200) {
-          final matchedName = fetchedModels
+          final matchedName = availableList
                   .where((m) => m.id == model)
                   .firstOrNull
                   ?.displayName ??
@@ -3160,7 +3222,7 @@ class GeminiService {
           return GeminiTestResult(
             isSuccess: true,
             modelName: model,
-            availableModels: fetchedModels,
+            availableModels: availableList,
             statusCode: 200,
             message:
                 '✅ Connection successful!\nConnected to Google Gemini ($matchedName).$modelsCountNote\nAI messaging is ready to use.',
@@ -3182,8 +3244,15 @@ class GeminiService {
           }
         } catch (_) {}
 
-        if (response.statusCode == 404) {
-          lastErrorMessage = rawApiMessage.isNotEmpty ? rawApiMessage : 'Model $model not found.';
+        final isModelIncompatible = response.statusCode == 404 ||
+            (response.statusCode == 400 &&
+                (rawApiMessage.toLowerCase().contains('modalities') ||
+                    rawApiMessage.toLowerCase().contains('not supported by the model') ||
+                    rawApiMessage.toLowerCase().contains('not found') ||
+                    rawApiMessage.toLowerCase().contains('unsupported for generatecontent')));
+
+        if (isModelIncompatible) {
+          lastErrorMessage = rawApiMessage.isNotEmpty ? rawApiMessage : 'Model $model not supported.';
           continue;
         }
 
@@ -3248,29 +3317,34 @@ class GeminiService {
         return GeminiTestResult(
           isSuccess: false,
           statusCode: response.statusCode,
+          availableModels: availableList,
           message: buffer.toString().trim(),
         );
       } on SocketException {
-        return const GeminiTestResult(
+        return GeminiTestResult(
           isSuccess: false,
+          availableModels: availableList,
           message:
               '❌ No internet connection. Could not reach Google servers. Please check your Wi-Fi or mobile data.',
         );
       } on TimeoutException {
-        return const GeminiTestResult(
+        return GeminiTestResult(
           isSuccess: false,
+          availableModels: availableList,
           message:
               '❌ Connection timed out. Google servers took too long to respond. Please check your network.',
         );
       } on HandshakeException {
-        return const GeminiTestResult(
+        return GeminiTestResult(
           isSuccess: false,
+          availableModels: availableList,
           message:
               '❌ SSL/TLS handshake failed with Google servers. Please verify device date and time.',
         );
       } catch (e) {
         return GeminiTestResult(
           isSuccess: false,
+          availableModels: availableList,
           message: '❌ Unexpected error testing connection: $e',
         );
       }
@@ -3282,9 +3356,10 @@ class GeminiService {
             lastErrorMessage?.contains('ListModels') == true);
 
     if (isProjectDisabled) {
-      return const GeminiTestResult(
+      return GeminiTestResult(
         isSuccess: false,
         statusCode: 404,
+        availableModels: availableList,
         message:
             '❌ Google Error: Generative Language API is disabled for this project (404).\n\n'
             'This API key belongs to a Google Cloud project where the Generative Language API has not been activated.\n\n'
@@ -3299,6 +3374,7 @@ class GeminiService {
     return GeminiTestResult(
       isSuccess: false,
       statusCode: lastStatusCode,
+      availableModels: availableList,
       message:
           '❌ Could not connect to Gemini models.\n${lastErrorMessage ?? "Please verify your key in Google AI Studio."}\n\n💡 Tip: In Google AI Studio (aistudio.google.com/app/apikey), click "Create API key in new project" to get a clean unrestricted key for Gemini 1.5 Flash.',
     );
@@ -7360,7 +7436,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.12.5',
+                    'LeadPilot v1.12.6',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,
@@ -8416,7 +8492,7 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
   bool _isTesting = false;
   String? _testResult;
   bool _isSuccess = false;
-  List<GeminiModelInfo> _availableModels = [];
+  final List<GeminiModelInfo> _availableModels = List.of(GeminiService.defaultModels);
   String _selectedModel = 'gemini-1.5-flash';
 
   @override
@@ -8446,7 +8522,12 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
       final models = await _geminiService.fetchAvailableModels(key);
       if (models.isNotEmpty && mounted) {
         setState(() {
-          _availableModels = models;
+          final existingIds = _availableModels.map((m) => m.id).toSet();
+          for (final m in models) {
+            if (!existingIds.contains(m.id)) {
+              _availableModels.add(m);
+            }
+          }
           if (!_availableModels.any((m) => m.id == _selectedModel)) {
             _selectedModel = _availableModels.first.id;
           }
@@ -8508,9 +8589,16 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
       _isSuccess = result.isSuccess;
       _testResult = result.message;
       if (result.availableModels.isNotEmpty) {
-        _availableModels = result.availableModels;
-        if (!_availableModels.any((m) => m.id == _selectedModel)) {
-          _selectedModel = result.modelName ?? _availableModels.first.id;
+        final existingIds = _availableModels.map((m) => m.id).toSet();
+        for (final m in result.availableModels) {
+          if (!existingIds.contains(m.id)) {
+            _availableModels.add(m);
+          }
+        }
+        if (result.isSuccess && result.modelName != null) {
+          _selectedModel = result.modelName!;
+        } else if (!_availableModels.any((m) => m.id == _selectedModel)) {
+          _selectedModel = _availableModels.first.id;
         }
       }
     });
@@ -8703,6 +8791,7 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
               if (_availableModels.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
+                  key: ValueKey('$_selectedModel-${_availableModels.length}'),
                   initialValue: _availableModels.any((m) => m.id == _selectedModel)
                       ? _selectedModel
                       : _availableModels.first.id,
