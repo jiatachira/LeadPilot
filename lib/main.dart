@@ -19,6 +19,35 @@ const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
 const _defaultWhatsAppCountryCode = '94';
+final _appNavigatorKey = GlobalKey<NavigatorState>();
+final _pendingReminderPopups = <Student>[];
+bool _isShowingReminderPopup = false;
+
+// ── Ringtone service ──────────────────────────────────────────────────────────
+// Android native ringtone play/stop via MethodChannel.
+// On non-Android platforms the calls are silently ignored.
+const _ringtoneChannel = MethodChannel('com.example.call_dial/ringtone');
+
+Future<void> _playReminderRingtone() async {
+  try {
+    await _ringtoneChannel.invokeMethod<void>('playRingtone');
+  } on PlatformException catch (e) {
+    debugPrint('Could not play ringtone: $e');
+  } on MissingPluginException {
+    // Not on Android or channel not registered – ignore silently.
+  }
+}
+
+Future<void> _stopReminderRingtone() async {
+  try {
+    await _ringtoneChannel.invokeMethod<void>('stopRingtone');
+  } on PlatformException catch (e) {
+    debugPrint('Could not stop ringtone: $e');
+  } on MissingPluginException {
+    // Not on Android or channel not registered – ignore silently.
+  }
+}
+
 const reminderSnoozeDuration = Duration(minutes: 5);
 const studentReminderActions = <AndroidNotificationAction>[
   AndroidNotificationAction(
@@ -99,6 +128,19 @@ Uri smsComposerUri(String phoneNumber) {
   final digits = normalizeContactPhone(phoneNumber);
   return Uri(scheme: 'sms', path: digits.isEmpty ? '' : '+$digits');
 }
+
+bool isNotInterestedStatus(String status) =>
+    status.trim().toLowerCase() == 'not interested';
+
+bool isNotPotentialStatus(String status) {
+  return switch (status.trim().toLowerCase()) {
+    'not potential' || 'not protencial' || 'not pretencial' => true,
+    _ => false,
+  };
+}
+
+bool isFinalLeadStatus(String status) =>
+    isNotInterestedStatus(status) || isNotPotentialStatus(status);
 
 enum StudentActivityLevel { active, cooling, inactive, unknown }
 
@@ -610,8 +652,8 @@ class LocalReminderService implements ReminderScheduler {
   }) : _plugin = plugin ?? _defaultPlugin,
        _storage = storage ?? const FlutterSecureStorage();
 
-  static const _channelId = 'student_call_reminders';
-  static const _channelName = 'Student call reminders';
+  static const _channelId = 'student_call_alarm_v2';
+  static const _channelName = 'Call reminder alarms';
   static const _notificationIdsKey = 'student_call_notification_ids';
   static const _scheduledRemindersKey = 'student_call_scheduled_reminders';
   static final FlutterLocalNotificationsPlugin _defaultPlugin =
@@ -725,10 +767,17 @@ class LocalReminderService implements ReminderScheduler {
           importance: Importance.max,
           priority: Priority.high,
           category: AndroidNotificationCategory.alarm,
+          fullScreenIntent: true,
+          ongoing: true,
+          playSound: true,
+          audioAttributesUsage: AudioAttributesUsage.alarm,
           actions: studentReminderActions,
         ),
         iOS: const DarwinNotificationDetails(
           categoryIdentifier: 'student_call_reminder',
+          presentAlert: true,
+          presentBanner: true,
+          presentSound: true,
         ),
       ),
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
@@ -960,12 +1009,83 @@ void _handleReminderNotificationResponse(NotificationResponse response) {
   final student = _studentFromReminderPayload(response.payload);
   if (student == null) return;
 
-  switch (response.actionId) {
-    case 'call_student':
-      unawaited(_callStudentFromReminder(student));
-    case 'snooze_reminder':
-      unawaited(_snoozeReminder(student));
+  if (response.actionId == 'call_student') {
+    unawaited(_callStudentFromReminder(student));
+  } else if (response.actionId == 'snooze_reminder') {
+    unawaited(_snoozeReminder(student));
+  } else {
+    _queueReminderPopup(student);
   }
+}
+
+void _queueReminderPopup(Student student) {
+  _pendingReminderPopups.add(student);
+  _showNextReminderPopup();
+}
+
+void _showNextReminderPopup() {
+  final context = _appNavigatorKey.currentContext;
+  if (_isShowingReminderPopup ||
+      _pendingReminderPopups.isEmpty ||
+      context == null) {
+    return;
+  }
+
+  final student = _pendingReminderPopups.removeAt(0);
+  _isShowingReminderPopup = true;
+
+  // 🔔 Start ringing when the popup appears.
+  unawaited(_playReminderRingtone());
+
+  unawaited(
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.alarm_rounded, color: _green, size: 36),
+        title: const Text('Upcoming Call Reminder'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              student.name,
+              textAlign: TextAlign.center,
+              style: Theme.of(dialogContext).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(student.phone),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () async {
+              unawaited(_stopReminderRingtone()); // 🔕 Stop ring on snooze
+              Navigator.of(dialogContext).pop();
+              await _snoozeReminder(student);
+            },
+            icon: const Icon(Icons.snooze_rounded),
+            label: const Text('Snooze 5 min'),
+          ),
+          FilledButton.icon(
+            onPressed: () async {
+              unawaited(_stopReminderRingtone()); // 🔕 Stop ring on call
+              Navigator.of(dialogContext).pop();
+              await _callStudentFromReminder(student);
+            },
+            icon: const Icon(Icons.call_rounded),
+            label: const Text('Call'),
+          ),
+        ],
+      ),
+    ).then((_) {
+      // 🔕 Also stop ring if dialog dismissed by any other means.
+      unawaited(_stopReminderRingtone());
+      _isShowingReminderPopup = false;
+      _showNextReminderPopup();
+    }),
+  );
 }
 
 @pragma('vm:entry-point')
@@ -1951,9 +2071,11 @@ class _LeadFilterSelection {
   final DateTime? dateTo;
 }
 
-enum _SettingsAction { sheetSync, filters, export, saveContacts }
+enum _SettingsAction { sheetSync, filters, export, reports, saveContacts }
 
 enum _StudentCardAction { edit, selectMultiple }
+
+enum _LeadReportAction { notInterested, notPotential }
 
 class SheetApiException implements Exception {
   const SheetApiException(this.message);
@@ -2191,6 +2313,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final filtered = _students
         .where(
           (student) =>
+              !isFinalLeadStatus(student.callStatus) &&
               _matchesLeadFilter(student) &&
               (query.isEmpty || _matchesSearch(student, query)),
         )
@@ -2204,7 +2327,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   List<Student> get _selectedStudents => _students
-      .where((student) => _selectedStudentKeys.contains(_selectionKey(student)))
+      .where(
+        (student) =>
+            !isFinalLeadStatus(student.callStatus) &&
+            _selectedStudentKeys.contains(_selectionKey(student)),
+      )
       .toList();
 
   String _selectionKey(Student student) {
@@ -2557,6 +2684,9 @@ class _HomeScreenState extends State<HomeScreen> {
       case _SettingsAction.export:
         await _exportStudentsToCsv(_filteredStudents);
         break;
+      case _SettingsAction.reports:
+        await _openLeadReports();
+        break;
       case _SettingsAction.saveContacts:
         await _saveVisibleContacts();
         break;
@@ -2604,6 +2734,44 @@ class _HomeScreenState extends State<HomeScreen> {
       _dateFrom = filters.dateFrom;
       _dateTo = filters.dateTo;
     });
+  }
+
+  Future<void> _openLeadReports() async {
+    final action = await showModalBottomSheet<_LeadReportAction>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _LeadReportsSheet(
+        notInterestedCount: _students
+            .where((student) => isNotInterestedStatus(student.callStatus))
+            .length,
+        notPotentialCount: _students
+            .where((student) => isNotPotentialStatus(student.callStatus))
+            .length,
+      ),
+    );
+    if (!mounted || action == null) return;
+
+    switch (action) {
+      case _LeadReportAction.notInterested:
+        await _exportStudentsToCsv(
+          _students
+              .where((student) => isNotInterestedStatus(student.callStatus))
+              .toList(),
+          fileName: 'not_interested_students.csv',
+          title: 'Not Interested report',
+          emptyMessage: 'There are no students in this report to export.',
+        );
+      case _LeadReportAction.notPotential:
+        await _exportStudentsToCsv(
+          _students
+              .where((student) => isNotPotentialStatus(student.callStatus))
+              .toList(),
+          fileName: 'not_potential_students.csv',
+          title: 'Not Potential report',
+          emptyMessage: 'There are no students in this report to export.',
+        );
+    }
   }
 
   bool get _hasActiveFilters =>
@@ -2731,9 +2899,14 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _exportStudentsToCsv(List<Student> students) async {
+  Future<void> _exportStudentsToCsv(
+    List<Student> students, {
+    String fileName = 'student_leads.csv',
+    String title = 'Export student leads',
+    String emptyMessage = 'No students match the current filters to export.',
+  }) async {
     if (students.isEmpty) {
-      _showMessage('No students match the current filters to export.');
+      _showMessage(emptyMessage);
       return;
     }
 
@@ -2742,16 +2915,10 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await SharePlus.instance.share(
         ShareParams(
-          files: [
-            XFile.fromData(
-              bytes,
-              mimeType: 'text/csv',
-              name: 'student_leads.csv',
-            ),
-          ],
-          fileNameOverrides: const ['student_leads.csv'],
-          title: 'Export student leads',
-          subject: 'Student leads CSV',
+          files: [XFile.fromData(bytes, mimeType: 'text/csv', name: fileName)],
+          fileNameOverrides: [fileName],
+          title: title,
+          subject: title,
           text: '${students.length} student record(s)',
           downloadFallbackEnabled: true,
         ),
@@ -3374,7 +3541,6 @@ class _LeadFilterSheetState extends State<_LeadFilterSheet> {
     'Very Interested',
     'Interested',
     'Minimal Interested',
-    'Not Interested',
     'Answered',
     'No Answer',
     'Not Responding',
@@ -3639,6 +3805,8 @@ class StudentCard extends StatelessWidget {
       'Call Back' ||
       'Future' => const Color(0xFFB36B16),
       'Not Interested' ||
+      'Not Potential' ||
+      'Not Protencial' ||
       'Wrong number' ||
       'Call Cut' => const Color(0xFFB54747),
       _ => Theme.of(context).colorScheme.onSurfaceVariant,
@@ -4145,6 +4313,7 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
     'Interested',
     'Minimal Interested',
     'Not Interested',
+    'Not Potential',
     'Answered',
     'No Answer',
     'Not Responding',
@@ -4218,7 +4387,9 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
       whatsappNumber: _sameAsContact ? phone : _whatsappController.text.trim(),
       whatsappSameAsContact: _sameAsContact,
       callStatus: callStatus,
-      nextCallDateTime: _nextCallDateTime?.toIso8601String() ?? '',
+      nextCallDateTime: isFinalLeadStatus(callStatus)
+          ? ''
+          : _nextCallDateTime?.toIso8601String() ?? '',
       comment: newComment.isEmpty ? null : newComment,
       commentHistory: history,
       attempts: attempts,
@@ -4489,7 +4660,13 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
                       )
                       .toList(),
                   onChanged: (value) {
-                    if (value != null) setState(() => _callStatus = value);
+                    if (value == null) return;
+                    setState(() {
+                      _callStatus = value;
+                      if (isFinalLeadStatus(value)) {
+                        _nextCallDateTime = null;
+                      }
+                    });
                   },
                 ),
                 const SizedBox(height: 12),
@@ -4813,6 +4990,118 @@ class _AddStudentSheetState extends State<_AddStudentSheet> {
   }
 }
 
+class _LeadReportsSheet extends StatelessWidget {
+  const _LeadReportsSheet({
+    required this.notInterestedCount,
+    required this.notPotentialCount,
+  });
+
+  final int notInterestedCount;
+  final int notPotentialCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        22,
+        12,
+        22,
+        MediaQuery.viewInsetsOf(context).bottom + 24,
+      ),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 42,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Lead reports',
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: theme.colorScheme.onSurface,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Export closed leads as separate CSV reports.',
+              style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              color: theme.colorScheme.surfaceContainerLow,
+              child: Column(
+                children: [
+                  _reportTile(
+                    context,
+                    title: 'Not Interested',
+                    count: notInterestedCount,
+                    action: _LeadReportAction.notInterested,
+                  ),
+                  Divider(
+                    height: 1,
+                    indent: 56,
+                    color: theme.colorScheme.outlineVariant,
+                  ),
+                  _reportTile(
+                    context,
+                    title: 'Not Potential',
+                    count: notPotentialCount,
+                    action: _LeadReportAction.notPotential,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _reportTile(
+    BuildContext context, {
+    required String title,
+    required int count,
+    required _LeadReportAction action,
+  }) {
+    final theme = Theme.of(context);
+    return ListTile(
+      leading: Icon(
+        Icons.file_download_outlined,
+        color: count == 0 ? theme.colorScheme.onSurfaceVariant : _green,
+      ),
+      title: Text(title),
+      subtitle: Text('$count student(s) · Export CSV'),
+      enabled: count > 0,
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: count == 0 ? null : () => Navigator.pop(context, action),
+    );
+  }
+}
+
 class _SettingsHubSheet extends StatelessWidget {
   const _SettingsHubSheet({
     required this.themeMode,
@@ -4923,6 +5212,20 @@ class _SettingsHubSheet extends StatelessWidget {
                       ),
                       onTap: () =>
                           Navigator.pop(context, _SettingsAction.filters),
+                    ),
+                    Divider(
+                      height: 1,
+                      indent: 56,
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.assessment_outlined),
+                      title: const Text('Lead reports'),
+                      subtitle: const Text(
+                        'Export Not Interested and Not Potential separately',
+                      ),
+                      onTap: () =>
+                          Navigator.pop(context, _SettingsAction.reports),
                     ),
                     Divider(
                       height: 1,
