@@ -2787,8 +2787,8 @@ class GeminiService {
   static const List<String> candidateModels = [
     'gemini-1.5-flash',
     'gemini-2.0-flash',
+    'gemini-1.5-flash-8b',
     'gemini-1.5-flash-latest',
-    'gemini-pro',
   ];
 
   static String sanitizeApiKey(String raw) {
@@ -2799,7 +2799,7 @@ class GeminiService {
       if (key.length <= 1) break;
       key = key.substring(1, key.length - 1).trim();
     }
-    final urlMatch = RegExp(r'[?&]key=([a-zA-Z0-9_\-]+)').firstMatch(key);
+    final urlMatch = RegExp(r'[?&]key=([a-zA-Z0-9_\-\.]+)').firstMatch(key);
     if (urlMatch != null) {
       key = urlMatch.group(1)!;
     } else if (key.startsWith('key=')) {
@@ -2811,7 +2811,7 @@ class GeminiService {
   }
 
   static bool looksLikeGoogleApiKey(String key) {
-    return key.startsWith('AIza') && key.length >= 35;
+    return (key.startsWith('AIza') || key.startsWith('AQ.')) && key.length >= 25;
   }
 
   Future<String> generateFollowUp({
@@ -2842,7 +2842,10 @@ class GeminiService {
         );
         final response = await _client.post(
           url,
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': cleanKey,
+          },
           body: jsonEncode({
             'contents': [
               {
@@ -2877,14 +2880,34 @@ class GeminiService {
         }
 
         String rawApiMessage = '';
+        String rawReason = '';
         try {
           final errJson = jsonDecode(response.body);
-          rawApiMessage = errJson['error']?['message'] as String? ?? '';
+          if (errJson is Map && errJson['error'] is Map) {
+            final err = errJson['error'] as Map;
+            rawApiMessage = (err['message'] as String?) ?? '';
+            final details = err['details'] as List?;
+            if (details != null && details.isNotEmpty) {
+              final first = details.first as Map?;
+              rawReason = (first?['reason'] as String?) ?? '';
+            }
+          }
         } catch (_) {}
 
         if (response.statusCode == 404) {
           lastError = rawApiMessage.isNotEmpty ? rawApiMessage : 'Model $model not found.';
           continue;
+        }
+
+        if (rawReason == 'ACCESS_TOKEN_TYPE_UNSUPPORTED' ||
+            (response.statusCode == 401 && rawApiMessage.contains('API key not valid'))) {
+          throw const GeminiException(
+            'Google rejected this API Key (ACCESS_TOKEN_TYPE_UNSUPPORTED).\n\n'
+            'Please generate an unrestricted key from Google AI Studio:\n'
+            '1. Go to aistudio.google.com/app/apikey\n'
+            '2. Click "Create API Key" -> "Create API key in new project"\n'
+            '3. Copy and paste the new key here.',
+          );
         }
 
         if (response.statusCode == 400 &&
@@ -2942,7 +2965,10 @@ class GeminiService {
         );
         final response = await _client.post(
           url,
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': cleanKey,
+          },
           body: jsonEncode({
             'contents': [
               {
@@ -2965,16 +2991,22 @@ class GeminiService {
             modelName: model,
             statusCode: 200,
             message:
-                '✅ Connection successful!\nConnected to Google Gemini ($model).\nAI messaging is ready to use.',
+                '✅ Connection successful!\nConnected to Google Gemini ($model - 100% Free).\nAI messaging is ready to use.',
           );
         }
 
         String rawApiMessage = '';
+        String rawReason = '';
         try {
           final bodyJson = jsonDecode(response.body);
           if (bodyJson is Map && bodyJson['error'] is Map) {
             final err = bodyJson['error'] as Map;
             rawApiMessage = (err['message'] as String?) ?? '';
+            final details = err['details'] as List?;
+            if (details != null && details.isNotEmpty) {
+              final first = details.first as Map?;
+              rawReason = (first?['reason'] as String?) ?? '';
+            }
           }
         } catch (_) {}
 
@@ -2983,10 +3015,14 @@ class GeminiService {
           continue;
         }
 
-        final isInvalidKey = response.statusCode == 400 &&
-            (rawApiMessage.toLowerCase().contains('api key not valid') ||
-                rawApiMessage.toLowerCase().contains('api_key_invalid') ||
-                rawApiMessage.toLowerCase().contains('invalid api key'));
+        final isUnsupportedToken = rawReason == 'ACCESS_TOKEN_TYPE_UNSUPPORTED' ||
+            (response.statusCode == 401 && rawApiMessage.toLowerCase().contains('unsupported'));
+
+        final isInvalidKey = response.statusCode == 401 ||
+            (response.statusCode == 400 &&
+                (rawApiMessage.toLowerCase().contains('api key not valid') ||
+                    rawApiMessage.toLowerCase().contains('api_key_invalid') ||
+                    rawApiMessage.toLowerCase().contains('invalid api key')));
 
         final isLocationBlocked = rawApiMessage
             .toLowerCase()
@@ -2995,12 +3031,24 @@ class GeminiService {
             rawApiMessage.toLowerCase().contains('resource has been exhausted');
 
         final buffer = StringBuffer();
-        if (isInvalidKey) {
+        if (isUnsupportedToken) {
+          buffer.writeln('❌ Google API Error: ACCESS_TOKEN_TYPE_UNSUPPORTED (401)');
+          buffer.writeln();
+          buffer.writeln(
+            'Google rejected this key because of project API restrictions in Google Cloud / AI Studio.',
+          );
+          buffer.writeln();
+          buffer.writeln('💡 Quick Fix (in 1 minute):');
+          buffer.writeln('1. Open Google AI Studio (aistudio.google.com/app/apikey)');
+          buffer.writeln('2. Click "Create API Key"');
+          buffer.writeln('3. Select "Create API key in new project" (Do not restrict to "Gemini API")');
+          buffer.writeln('4. Copy the new key and paste it here.');
+        } else if (isInvalidKey) {
           buffer.writeln('❌ Google rejected this API key (Invalid API Key).');
           buffer.writeln();
           if (!looksLikeGoogleApiKey(cleanKey)) {
             buffer.writeln(
-              '⚠️ Key format warning: Google Gemini API keys usually start with "AIzaSy" (~39 characters). Make sure you copied the API Key, not the Google Cloud Project ID or Name.',
+              '⚠️ Key format warning: Google Gemini API keys usually start with "AIzaSy..." or "AQ." (~33–39 characters). Make sure you copied the API Key, not the Google Cloud Project ID or Name.',
             );
             buffer.writeln();
           }
@@ -3060,7 +3108,7 @@ class GeminiService {
       isSuccess: false,
       statusCode: lastStatusCode,
       message:
-          '❌ Could not connect to Gemini models.\n${lastErrorMessage ?? "Please verify your key in Google AI Studio."}',
+          '❌ Could not connect to Gemini models.\n${lastErrorMessage ?? "Please verify your key in Google AI Studio."}\n\n💡 Tip: In Google AI Studio (aistudio.google.com/app/apikey), click "Create API key in new project" to get a clean unrestricted key for Gemini 1.5 Flash.',
     );
   }
 
@@ -7120,7 +7168,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.12.2',
+                    'LeadPilot v1.12.3',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,
@@ -8398,7 +8446,7 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
               ),
               const SizedBox(height: 6),
               Text(
-                '💡 Gemini API keys start with "AIzaSy..." (~39 chars). Newly created keys can take 30–60s to activate across Google servers.',
+                '💡 Gemini API keys start with "AIzaSy..." or "AQ." (100% Free on Gemini 1.5 Flash). Newly created keys can take 30–60s to activate.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                   fontSize: 11,
