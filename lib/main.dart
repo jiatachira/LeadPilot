@@ -761,11 +761,13 @@ class SecureAppSettingsStore implements AppSettingsStore {
   }
 
   @override
-  Future<void> saveCachedStudents(List<Student> students) =>
-      _storage.write(
-        key: _cachedStudentsKey,
-        value: jsonEncode(students.map((s) => s.toJson()).toList()),
-      );
+  Future<void> saveCachedStudents(List<Student> students) async {
+    await _storage.write(
+      key: _cachedStudentsKey,
+      value: jsonEncode(students.map((s) => s.toJson()).toList()),
+    );
+    unawaited(CallerIdService.syncStudents(students));
+  }
 
   @override
   Future<List<WhatsAppTemplate>> readWhatsAppTemplates() async {
@@ -897,6 +899,7 @@ class MemoryAppSettingsStore implements AppSettingsStore {
     cachedStudents
       ..clear()
       ..addAll(students);
+    unawaited(CallerIdService.syncStudents(students));
   }
 
   @override
@@ -914,6 +917,113 @@ ThemeMode _themeModeFromName(String? value) => switch (value) {
   'dark' => ThemeMode.dark,
   _ => ThemeMode.system,
 };
+
+class CallerIdService {
+  static const MethodChannel channel =
+      MethodChannel('com.example.call_dial/caller_id');
+
+  static Future<bool> isEnabled() async {
+    try {
+      final res = await channel.invokeMethod<bool>('isCallerIdEnabled');
+      return res ?? true;
+    } on MissingPluginException {
+      return true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<void> setEnabled(bool enabled) async {
+    try {
+      await channel.invokeMethod('setCallerIdEnabled', {'enabled': enabled});
+    } on MissingPluginException {
+      // In tests
+    } catch (_) {}
+  }
+
+  static Future<bool> canDrawOverlays() async {
+    try {
+      final res = await channel.invokeMethod<bool>('canDrawOverlays');
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> requestOverlayPermission() async {
+    try {
+      await channel.invokeMethod('requestOverlayPermission');
+    } on MissingPluginException {
+      // In tests
+    } catch (_) {}
+  }
+
+  static Future<bool> hasPhonePermissions() async {
+    try {
+      final res = await channel.invokeMethod<bool>('hasPhonePermissions');
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> requestPhonePermissions() async {
+    try {
+      final res = await channel.invokeMethod<bool>('requestPhonePermissions');
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> testCallerIdPopup() async {
+    try {
+      await channel.invokeMethod('testCallerIdPopup');
+    } on MissingPluginException {
+      // In tests
+    } catch (_) {}
+  }
+
+  static Future<void> dismissOverlay() async {
+    try {
+      await channel.invokeMethod('dismissOverlay');
+    } on MissingPluginException {
+      // In tests
+    } catch (_) {}
+  }
+
+  static Future<void> syncStudents(List<Student> students) async {
+    try {
+      final payload = students.map((s) {
+        final activity = studentActivityStatus(s);
+        final latestComment = s.commentHistory.isNotEmpty
+            ? s.commentHistory.last.trim()
+            : s.comment.trim();
+        return {
+          'name': s.name,
+          'phone': s.phone,
+          'whatsappNumber': s.whatsappNumber,
+          'status': s.callStatus,
+          'location': s.location,
+          'examType': s.examType,
+          'examYear': s.examYear,
+          'lastComment': latestComment,
+          'streak': activity.unansweredStreak,
+        };
+      }).toList();
+
+      await channel.invokeMethod('syncCallerIdData', {'students': payload});
+    } on MissingPluginException {
+      // In tests
+    } catch (_) {}
+  }
+}
 
 abstract interface class ReminderScheduler {
   Future<bool> canScheduleExactAlarms();
@@ -2865,6 +2975,9 @@ class _HomeScreenState extends State<HomeScreen> {
       });
       if (queue.isNotEmpty) {
         _startOfflineQueueTimer();
+      }
+      if (_students.isNotEmpty) {
+        unawaited(CallerIdService.syncStudents(_students));
       }
     } catch (_) {}
 
@@ -6094,7 +6207,7 @@ class _LeadReportsSheet extends StatelessWidget {
   }
 }
 
-class _SettingsHubSheet extends StatelessWidget {
+class _SettingsHubSheet extends StatefulWidget {
   const _SettingsHubSheet({
     required this.themeMode,
     required this.onThemeModeChanged,
@@ -6110,6 +6223,91 @@ class _SettingsHubSheet extends StatelessWidget {
   final bool hasActiveFilters;
   final bool biometricEnabled;
   final Future<void> Function(bool) onBiometricChanged;
+
+  @override
+  State<_SettingsHubSheet> createState() => _SettingsHubSheetState();
+}
+
+class _SettingsHubSheetState extends State<_SettingsHubSheet> {
+  bool _callerIdEnabled = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCallerIdState();
+  }
+
+  Future<void> _loadCallerIdState() async {
+    final enabled = await CallerIdService.isEnabled();
+    if (mounted) {
+      setState(() => _callerIdEnabled = enabled);
+    }
+  }
+
+  Future<void> _handleCallerIdToggle(bool enable) async {
+    if (enable) {
+      final hasOverlay = await CallerIdService.canDrawOverlays();
+      if (!mounted) return;
+      if (!hasOverlay) {
+        final proceed = await showDialog<bool>(
+          context: context,
+          builder: (dialogCtx) => AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.layers_outlined, color: Color(0xFF62D6B0)),
+                SizedBox(width: 8),
+                Text('Display Over Apps'),
+              ],
+            ),
+            content: const Text(
+              'To show the Caller ID popup when a student calls, LeadPilot needs the "Display over other apps" permission.\n\nPlease enable it on the next screen.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogCtx, true),
+                child: const Text('Grant Permission'),
+              ),
+            ],
+          ),
+        );
+        if (proceed == true) {
+          await CallerIdService.requestOverlayPermission();
+        }
+      }
+
+      final hasPhone = await CallerIdService.hasPhonePermissions();
+      if (!hasPhone) {
+        await CallerIdService.requestPhonePermissions();
+      }
+
+      await CallerIdService.setEnabled(true);
+      if (mounted) setState(() => _callerIdEnabled = true);
+    } else {
+      await CallerIdService.setEnabled(false);
+      if (mounted) setState(() => _callerIdEnabled = false);
+    }
+  }
+
+  Future<void> _testCallerIdPopup() async {
+    final hasOverlay = await CallerIdService.canDrawOverlays();
+    if (!mounted) return;
+    if (!hasOverlay) {
+      await _handleCallerIdToggle(true);
+      return;
+    }
+    await CallerIdService.testCallerIdPopup();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Sample Caller ID popup displayed!'),
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -6163,8 +6361,8 @@ class _SettingsHubSheet extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<ThemeMode>(
-                key: ValueKey(themeMode),
-                initialValue: themeMode,
+                key: ValueKey(widget.themeMode),
+                initialValue: widget.themeMode,
                 decoration: const InputDecoration(
                   labelText: 'Theme',
                   prefixIcon: Icon(Icons.palette_outlined),
@@ -6181,7 +6379,7 @@ class _SettingsHubSheet extends StatelessWidget {
                   DropdownMenuItem(value: ThemeMode.dark, child: Text('Dark')),
                 ],
                 onChanged: (mode) {
-                  if (mode != null) unawaited(onThemeModeChanged(mode));
+                  if (mode != null) unawaited(widget.onThemeModeChanged(mode));
                 },
               ),
               const SizedBox(height: 20),
@@ -6199,7 +6397,7 @@ class _SettingsHubSheet extends StatelessWidget {
                   children: [
                     ListTile(
                       leading: Badge(
-                        isLabelVisible: hasActiveFilters,
+                        isLabelVisible: widget.hasActiveFilters,
                         child: const Icon(Icons.tune_rounded),
                       ),
                       title: const Text('Filter by date and call status'),
@@ -6285,7 +6483,7 @@ class _SettingsHubSheet extends StatelessWidget {
                   leading: const Icon(Icons.cloud_sync_outlined),
                   title: const Text('Google Sheets Sync'),
                   subtitle: Text(
-                    isSheetConnected
+                    widget.isSheetConnected
                         ? 'Sheet URL and linked sheets'
                         : 'Link a Google Apps Script Web App',
                   ),
@@ -6314,8 +6512,48 @@ class _SettingsHubSheet extends StatelessWidget {
                   subtitle: const Text(
                     'Use fingerprint to log in instead of PIN',
                   ),
-                  value: biometricEnabled,
-                  onChanged: (val) => unawaited(onBiometricChanged(val)),
+                  value: widget.biometricEnabled,
+                  onChanged: (val) => unawaited(widget.onBiometricChanged(val)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Caller ID',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Card(
+                color: theme.colorScheme.surfaceContainerLow,
+                child: Column(
+                  children: [
+                    SwitchListTile(
+                      secondary: const Icon(Icons.phone_in_talk_rounded),
+                      title: const Text('Incoming Caller ID Popup'),
+                      subtitle: const Text(
+                        'Show offline student details when a registered lead calls',
+                      ),
+                      value: _callerIdEnabled,
+                      onChanged: _handleCallerIdToggle,
+                    ),
+                    if (_callerIdEnabled) ...[
+                      Divider(
+                        height: 1,
+                        indent: 56,
+                        color: theme.colorScheme.outlineVariant,
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.preview_rounded),
+                        title: const Text('Preview / Test Popup'),
+                        subtitle: const Text(
+                          'Display a sample floating card over the screen',
+                        ),
+                        onTap: _testCallerIdPopup,
+                      ),
+                    ],
+                  ],
                 ),
               ),
               const SizedBox(height: 16),
@@ -6323,7 +6561,7 @@ class _SettingsHubSheet extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.10.0',
+                    'LeadPilot v1.11.0',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,

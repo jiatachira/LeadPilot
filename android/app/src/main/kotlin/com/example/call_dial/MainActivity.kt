@@ -1,22 +1,35 @@
 package com.example.call_dial
 
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
-import android.media.Ringtone
+import android.provider.Settings
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterFragmentActivity() {
-    private val channelName = "com.example.call_dial/ringtone"
+    private val ringtoneChannelName = "com.example.call_dial/ringtone"
+    private val callerIdChannelName = "com.example.call_dial/caller_id"
     private var ringtone: Ringtone? = null
+
+    private var pendingPhonePermissionResult: MethodChannel.Result? = null
+    private val phonePermissionRequestCode = 2001
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
+
+        // Ringtone Channel
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, ringtoneChannelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "playRingtone" -> {
@@ -56,6 +69,118 @@ class MainActivity : FlutterFragmentActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // Caller ID Channel
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, callerIdChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "syncCallerIdData" -> {
+                        try {
+                            val students = call.argument<List<Map<String, Any>>>("students") ?: emptyList()
+                            CallerIdCacheManager.saveStudents(applicationContext, students)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("SYNC_ERROR", e.message, null)
+                        }
+                    }
+                    "isCallerIdEnabled" -> {
+                        result.success(CallerIdCacheManager.isCallerIdEnabled(applicationContext))
+                    }
+                    "setCallerIdEnabled" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: true
+                        CallerIdCacheManager.setCallerIdEnabled(applicationContext, enabled)
+                        result.success(true)
+                    }
+                    "canDrawOverlays" -> {
+                        result.success(Settings.canDrawOverlays(this))
+                    }
+                    "requestOverlayPermission" -> {
+                        try {
+                            val intent = Intent(
+                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:$packageName")
+                            )
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("OVERLAY_ERROR", e.message, null)
+                        }
+                    }
+                    "hasPhonePermissions" -> {
+                        result.success(checkHasPhonePermissions())
+                    }
+                    "requestPhonePermissions" -> {
+                        if (checkHasPhonePermissions()) {
+                            result.success(true)
+                        } else {
+                            val permissions = mutableListOf(Manifest.permission.READ_PHONE_STATE)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                permissions.add(Manifest.permission.READ_CALL_LOG)
+                            }
+                            pendingPhonePermissionResult = result
+                            ActivityCompat.requestPermissions(
+                                this,
+                                permissions.toTypedArray(),
+                                phonePermissionRequestCode
+                            )
+                        }
+                    }
+                    "testCallerIdPopup" -> {
+                        try {
+                            val sampleInfo = StudentCallerInfo(
+                                name = "Kamal Perera",
+                                phone = "077 123 4567",
+                                status = "Interested",
+                                location = "Colombo",
+                                examType = "2026 A/L",
+                                examYear = "",
+                                lastComment = "Asked to call back tomorrow afternoon after 4 PM.",
+                                streakCount = 3
+                            )
+                            CallerIdOverlayManager.show(applicationContext, sampleInfo)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("TEST_POPUP_ERROR", e.message, null)
+                        }
+                    }
+                    "dismissOverlay" -> {
+                        CallerIdOverlayManager.dismiss(applicationContext)
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    private fun checkHasPhonePermissions(): Boolean {
+        val phoneStateOk = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.READ_PHONE_STATE
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val callLogOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_CALL_LOG
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+
+        return phoneStateOk && callLogOk
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == phonePermissionRequestCode) {
+            val granted = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+            pendingPhonePermissionResult?.success(granted)
+            pendingPhonePermissionResult = null
+        }
     }
 
     private fun stopCurrentRingtone() {

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -2148,4 +2149,107 @@ void main() {
       expect(find.text('Kamal Perera'), findsNothing);
     },
   );
+
+  test('CallerIdService syncs student leads with normalized attributes to native channel', () async {
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(CallerIdService.channel, (call) async {
+      calls.add(call);
+      if (call.method == 'isCallerIdEnabled') return true;
+      if (call.method == 'canDrawOverlays') return true;
+      if (call.method == 'hasPhonePermissions') return true;
+      return true;
+    });
+
+    final now = DateTime.now();
+    final student = Student(
+      name: 'Nimal Silva',
+      phone: '071 234 5678',
+      whatsappNumber: '077 888 9999',
+      callStatus: 'No Answer',
+      location: 'Gampaha',
+      examType: '2026 A/L',
+      comment: 'Follow up requested tomorrow afternoon',
+      attempts: [
+        CallAttempt(
+          dateTime: now.subtract(const Duration(days: 3)).toIso8601String(),
+          status: 'No Answer',
+          comment: 'Line ringing',
+        ),
+        CallAttempt(
+          dateTime: now.subtract(const Duration(days: 2)).toIso8601String(),
+          status: 'Not Responding',
+          comment: 'Ringing no answer',
+        ),
+        CallAttempt(
+          dateTime: now.subtract(const Duration(days: 1)).toIso8601String(),
+          status: 'Call Cut',
+          comment: 'Line busy',
+        ),
+      ],
+    );
+
+    await CallerIdService.syncStudents([student]);
+
+    expect(calls, hasLength(1));
+    expect(calls.first.method, 'syncCallerIdData');
+    final args = calls.first.arguments as Map<dynamic, dynamic>;
+    final studentsList = args['students'] as List<dynamic>;
+    expect(studentsList, hasLength(1));
+
+    final synced = (studentsList.first as Map).cast<String, dynamic>();
+    expect(synced['name'], 'Nimal Silva');
+    expect(synced['phone'], '071 234 5678');
+    expect(synced['whatsappNumber'], '077 888 9999');
+    expect(synced['status'], 'No Answer');
+    expect(synced['location'], 'Gampaha');
+    expect(synced['examType'], '2026 A/L');
+    expect(synced['lastComment'], 'Follow up requested tomorrow afternoon');
+    expect(synced['streak'], 3);
+
+    expect(await CallerIdService.isEnabled(), isTrue);
+    await CallerIdService.setEnabled(false);
+    expect(calls.any((c) => c.method == 'setCallerIdEnabled'), isTrue);
+
+    await CallerIdService.testCallerIdPopup();
+    expect(calls.any((c) => c.method == 'testCallerIdPopup'), isTrue);
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(CallerIdService.channel, null);
+  });
+
+  testWidgets('Settings displays Incoming Caller ID toggle, test popup, and v1.11.0', (tester) async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(CallerIdService.channel, (call) async {
+      if (call.method == 'isCallerIdEnabled') return true;
+      if (call.method == 'canDrawOverlays') return true;
+      if (call.method == 'hasPhonePermissions') return true;
+      return true;
+    });
+
+    final settingsStore = MemoryAppSettingsStore()..pin = '2580';
+    await tester.pumpWidget(testApp(settingsStore: settingsStore));
+    await tester.pumpAndSettle();
+    await enterPin(tester, '2580');
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+
+    final testPopupFinder = find.text('Preview / Test Popup');
+    await tester.ensureVisible(testPopupFinder);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Caller ID'), findsOneWidget);
+    expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
+    expect(testPopupFinder, findsOneWidget);
+    expect(find.text('LeadPilot v1.11.0'), findsOneWidget);
+
+    await tester.tap(testPopupFinder);
+    await tester.pumpAndSettle();
+    expect(find.text('Sample Caller ID popup displayed!'), findsOneWidget);
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(CallerIdService.channel, null);
+  });
 }
