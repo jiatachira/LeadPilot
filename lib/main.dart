@@ -4826,9 +4826,45 @@ class _HomeScreenState extends State<HomeScreen> {
         endpoint,
       );
       if (!mounted || syncGeneration != _syncGeneration) return;
+      final currentStudentsByKey = {
+        for (final s in _students) _studentKey(s): s,
+      };
       final merged = <String, Student>{};
       for (final student in sheetStudents) {
-        merged[_studentKey(student)] = student;
+        final key = _studentKey(student);
+        final current = currentStudentsByKey[key];
+        if (current != null && isFinalLeadStatus(current.callStatus)) {
+          // If the sheet did not mark it final, preserve the locally marked final status (Inactive, Not Interested, Not Potential)
+          if (!isFinalLeadStatus(student.callStatus)) {
+            merged[key] = student.copyWith(
+              callStatus: current.callStatus,
+              nextCallDateTime: '',
+              comment: current.comment.isNotEmpty
+                  ? current.comment
+                  : student.comment,
+              commentHistory:
+                  current.commentHistory.length >= student.commentHistory.length
+                      ? current.commentHistory
+                      : student.commentHistory,
+              attempts: current.attempts.length >= student.attempts.length
+                  ? current.attempts
+                  : student.attempts,
+            );
+            continue;
+          }
+        }
+
+        // Safety rule: if fetched student has >= 6 consecutive unanswered calls, automatically treat as Inactive
+        if (!isFinalLeadStatus(student.callStatus) &&
+            studentActivityStatus(student).unansweredStreak >= 6) {
+          merged[key] = student.copyWith(
+            callStatus: 'Inactive',
+            nextCallDateTime: '',
+          );
+          continue;
+        }
+
+        merged[key] = student;
       }
       for (final queued in _offlineQueue) {
         merged[_studentKey(queued.student)] = queued.student;
@@ -7039,9 +7075,49 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
                         );
 
                         if (moveToInactive == true) {
+                          final enteredComment =
+                              _commentController.text.trim();
+                          final updatedAttempts =
+                              List<CallAttempt>.of(updated.attempts);
+                          final inactiveComment = enteredComment.isNotEmpty
+                              ? enteredComment
+                              : 'Marked as Inactive after $nextStreak unanswered calls';
+                          if (updatedAttempts.isNotEmpty) {
+                            final last = updatedAttempts.last;
+                            updatedAttempts[updatedAttempts.length - 1] =
+                                CallAttempt(
+                              dateTime: last.dateTime,
+                              status: 'Inactive',
+                              comment: inactiveComment,
+                            );
+                          } else {
+                            updatedAttempts.add(
+                              CallAttempt(
+                                dateTime: DateTime.now().toIso8601String(),
+                                status: 'Inactive',
+                                comment: inactiveComment,
+                              ),
+                            );
+                          }
+
+                          final updatedHistory =
+                              List<String>.of(updated.commentHistory);
+                          final historyEntry =
+                              '${_formatReminder(DateTime.now())} — Inactive ($inactiveComment)';
+                          if (enteredComment.isNotEmpty &&
+                              updatedHistory.isNotEmpty) {
+                            updatedHistory[updatedHistory.length - 1] =
+                                historyEntry;
+                          } else if (!updatedHistory.contains(historyEntry)) {
+                            updatedHistory.add(historyEntry);
+                          }
+
                           final inactiveStudent = updated.copyWith(
                             callStatus: 'Inactive',
                             nextCallDateTime: '',
+                            comment: inactiveComment,
+                            commentHistory: updatedHistory,
+                            attempts: updatedAttempts,
                           );
                           if (context.mounted) {
                             Navigator.of(context).pop(inactiveStudent);
@@ -7890,7 +7966,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.14.0',
+                    'LeadPilot v1.14.1',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,

@@ -239,6 +239,23 @@ function attemptsFromPayload_(payload) {
       comment: text_(payload.comment),
     });
   }
+  if (
+    payload.callStatus &&
+    (payload.callStatus.toLowerCase() === 'inactive' ||
+      payload.callStatus.toLowerCase() === 'not interested' ||
+      payload.callStatus.toLowerCase() === 'not potential')
+  ) {
+    const hasFinal = normalized.some(
+      (a) => a.status.toLowerCase() === payload.callStatus.toLowerCase(),
+    );
+    if (!hasFinal) {
+      normalized.push({
+        dateTime: new Date().toISOString(),
+        status: text_(payload.callStatus),
+        comment: text_(payload.comment || payload.callStatus),
+      });
+    }
+  }
   return normalized.filter(
     (attempt) => attempt.dateTime !== '' && attempt.status !== '',
   );

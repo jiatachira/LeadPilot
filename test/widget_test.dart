@@ -1186,14 +1186,13 @@ void main() {
       final now = DateTime.now();
       final yesterday = now.subtract(const Duration(days: 1));
       final tomorrow = now.add(const Duration(days: 1));
+      final todayCallTime = DateTime(now.year, now.month, now.day, 12, 0);
       final students = [
         {
           'name': 'Today Call',
           'contact': '555-0401',
           'addedDate': now.toIso8601String(),
-          'nextCallDateTime': now
-              .add(const Duration(hours: 1))
-              .toIso8601String(),
+          'nextCallDateTime': todayCallTime.toIso8601String(),
           'callStatus': 'Interested',
           'attempts': [],
         },
@@ -2156,6 +2155,12 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Kamal Perera'), findsNothing);
+
+      // Verify that syncing with Google Sheet does NOT bring the inactive student back to the active list
+      await tester.tap(find.text('Sync now'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Kamal Perera'), findsNothing);
     },
   );
 
@@ -2253,7 +2258,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.14.0'), findsOneWidget);
+    expect(find.text('LeadPilot v1.14.1'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
