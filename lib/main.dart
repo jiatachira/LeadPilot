@@ -2788,7 +2788,6 @@ class GeminiService {
     'gemini-1.5-flash',
     'gemini-2.0-flash',
     'gemini-1.5-flash-8b',
-    'gemini-1.5-flash-latest',
   ];
 
   static String sanitizeApiKey(String raw) {
@@ -2895,7 +2894,16 @@ class GeminiService {
         } catch (_) {}
 
         if (response.statusCode == 404) {
-          lastError = rawApiMessage.isNotEmpty ? rawApiMessage : 'Model $model not found.';
+          final isApiDisabled = rawApiMessage.contains('is not found for API version') ||
+              rawApiMessage.contains('not supported for generateContent') ||
+              rawApiMessage.contains('ListModels');
+          if (isApiDisabled) {
+            lastError =
+                'Generative Language API is disabled on this Google project (404).\n\n'
+                'Please open Google AI Studio (aistudio.google.com/app/apikey) and click "Create API key in new project" to get an active free key.';
+          } else {
+            lastError = rawApiMessage.isNotEmpty ? rawApiMessage : 'Model $model not found.';
+          }
           continue;
         }
 
@@ -3102,6 +3110,26 @@ class GeminiService {
           message: '❌ Unexpected error testing connection: $e',
         );
       }
+    }
+
+    final isProjectDisabled = lastStatusCode == 404 &&
+        (lastErrorMessage?.contains('is not found for API version') == true ||
+            lastErrorMessage?.contains('not supported for generateContent') == true ||
+            lastErrorMessage?.contains('ListModels') == true);
+
+    if (isProjectDisabled) {
+      return const GeminiTestResult(
+        isSuccess: false,
+        statusCode: 404,
+        message:
+            '❌ Google Error: Generative Language API is disabled for this project (404).\n\n'
+            'This API key belongs to a Google Cloud project where the Generative Language API has not been activated.\n\n'
+            '💡 Simple 30-Second Fix:\n'
+            '1. Open Google AI Studio (aistudio.google.com/app/apikey)\n'
+            '2. Click the blue "Create API key" button\n'
+            '3. Choose "Create API key in new project" (Do NOT choose your existing project)\n'
+            '4. Copy the new key and paste it here.',
+      );
     }
 
     return GeminiTestResult(
@@ -7168,7 +7196,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.12.3',
+                    'LeadPilot v1.12.4',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,

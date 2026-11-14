@@ -2244,7 +2244,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.12.3'), findsOneWidget);
+    expect(find.text('LeadPilot v1.12.4'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -2429,7 +2429,29 @@ void main() {
     final errRes = await invalidService.testConnection('bad_key_123');
     expect(errRes.isSuccess, isFalse);
     expect(errRes.message.contains('Google rejected this API key'), isTrue);
-    expect(errRes.message.contains('Format Note') || errRes.message.contains('AIzaSy'), isTrue);
+
+    final projectDisabledClient = MockClient((request) async {
+      return http.Response(
+        jsonEncode({
+          'error': {
+            'code': 404,
+            'message':
+                'models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.',
+            'status': 'NOT_FOUND',
+          }
+        }),
+        404,
+      );
+    });
+
+    final projectDisabledService =
+        GeminiService(client: projectDisabledClient);
+    final disabledRes = await projectDisabledService
+        .testConnection('AQ.Ab8RN6L_nOJHLak9Aea9qBX5fMjc');
+    expect(disabledRes.isSuccess, isFalse);
+    expect(disabledRes.statusCode, 404);
+    expect(disabledRes.message.contains('Generative Language API is disabled'), isTrue);
+    expect(disabledRes.message.contains('Create API key in new project'), isTrue);
   });
 
   testWidgets('ManageGeminiAiSheet tests key and displays connection feedback', (tester) async {
