@@ -41,6 +41,16 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <activity
+            android:name=".CallerIdActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Transparent.CallerId"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:excludeFromRecents="true"
+            android:showOnLockScreen="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.example.call_dial.callerid" />
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
             android:exported="false" />

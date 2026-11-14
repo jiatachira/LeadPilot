@@ -150,6 +150,7 @@ class MainActivity : FlutterFragmentActivity() {
                         }
                     }
                     "dismissOverlay" -> {
+                        CallerIdActivity.dismissCurrent()
                         CallerIdOverlayManager.dismiss(applicationContext)
                         result.success(true)
                     }
