@@ -2244,7 +2244,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.12.0'), findsOneWidget);
+    expect(find.text('LeadPilot v1.12.1'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -2355,5 +2355,123 @@ void main() {
     expect(find.text('Template'), findsOneWidget);
     expect(find.text('Generate with AI'), findsOneWidget);
     expect(find.text('Gemini'), findsOneWidget);
+  });
+
+  test('GeminiService.sanitizeApiKey correctly cleans messy input keys', () {
+    expect(
+      GeminiService.sanitizeApiKey('  "AIzaSyD1234567890abcdefghijklmnopqrst"  '),
+      'AIzaSyD1234567890abcdefghijklmnopqrst',
+    );
+    expect(
+      GeminiService.sanitizeApiKey("'AIzaSyD1234567890abcdefghijklmnopqrst'"),
+      'AIzaSyD1234567890abcdefghijklmnopqrst',
+    );
+    expect(
+      GeminiService.sanitizeApiKey('key=AIzaSyD1234567890abcdefghijklmnopqrst'),
+      'AIzaSyD1234567890abcdefghijklmnopqrst',
+    );
+    expect(
+      GeminiService.sanitizeApiKey('https://generativelanguage.googleapis.com?key=AIzaSyD1234567890abcdefghijklmnopqrst'),
+      'AIzaSyD1234567890abcdefghijklmnopqrst',
+    );
+    expect(
+      GeminiService.sanitizeApiKey('  `AIzaSyD1234567890abcdefghijklmnopqrst` \n'),
+      'AIzaSyD1234567890abcdefghijklmnopqrst',
+    );
+    expect(
+      GeminiService.looksLikeGoogleApiKey('AIzaSyD1234567890abcdefghijklmnopqrst'),
+      isTrue,
+    );
+    expect(
+      GeminiService.looksLikeGoogleApiKey('leadpilot-project-id'),
+      isFalse,
+    );
+  });
+
+  test('GeminiService.testConnection handles successful connection and error parsing', () async {
+    final successClient = MockClient((request) async {
+      return http.Response(
+        jsonEncode({
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {'text': 'pong'}
+                ]
+              }
+            }
+          ]
+        }),
+        200,
+      );
+    });
+
+    final successService = GeminiService(client: successClient);
+    final res = await successService.testConnection('AIzaSyD1234567890abcdefghijklmnopqrst');
+    expect(res.isSuccess, isTrue);
+    expect(res.message.contains('Connection successful'), isTrue);
+    expect(res.modelName, 'gemini-1.5-flash');
+
+    final invalidKeyClient = MockClient((request) async {
+      return http.Response(
+        jsonEncode({
+          'error': {
+            'code': 400,
+            'message': 'API key not valid. Please pass a valid API key.',
+            'status': 'INVALID_ARGUMENT',
+          }
+        }),
+        400,
+      );
+    });
+
+    final invalidService = GeminiService(client: invalidKeyClient);
+    final errRes = await invalidService.testConnection('bad_key_123');
+    expect(errRes.isSuccess, isFalse);
+    expect(errRes.message.contains('Google rejected this API key'), isTrue);
+    expect(errRes.message.contains('Format Note') || errRes.message.contains('AIzaSy'), isTrue);
+  });
+
+  testWidgets('ManageGeminiAiSheet tests key and displays connection feedback', (tester) async {
+    final mockClient = MockClient((request) async {
+      return http.Response(
+        jsonEncode({
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {'text': 'ok'}
+                ]
+              }
+            }
+          ]
+        }),
+        200,
+      );
+    });
+
+    final store = MemoryAppSettingsStore()
+      ..geminiApiKey = 'AIzaSyD1234567890abcdefghijklmnopqrst';
+    final service = GeminiService(client: mockClient);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ManageGeminiAiSheet(
+            settingsStore: store,
+            geminiService: service,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Gemini AI Assistant'), findsOneWidget);
+    expect(find.text('Test Key'), findsOneWidget);
+
+    await tester.tap(find.text('Test Key'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Connection successful'), findsOneWidget);
   });
 }

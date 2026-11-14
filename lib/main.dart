@@ -2764,15 +2764,55 @@ class GeminiException implements Exception {
   String toString() => message;
 }
 
+class GeminiTestResult {
+  const GeminiTestResult({
+    required this.isSuccess,
+    required this.message,
+    this.modelName,
+    this.statusCode,
+  });
+
+  final bool isSuccess;
+  final String message;
+  final String? modelName;
+  final int? statusCode;
+}
+
 class GeminiService {
   GeminiService({http.Client? client})
     : _client = client ?? http.Client();
 
   final http.Client _client;
 
-  static const String geminiModel = 'gemini-1.5-flash';
-  static const String baseUrl =
-      'https://generativelanguage.googleapis.com/v1beta/models/$geminiModel:generateContent';
+  static const List<String> candidateModels = [
+    'gemini-1.5-flash',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash-latest',
+    'gemini-pro',
+  ];
+
+  static String sanitizeApiKey(String raw) {
+    var key = raw.trim();
+    while ((key.startsWith('"') && key.endsWith('"')) ||
+        (key.startsWith("'") && key.endsWith("'")) ||
+        (key.startsWith('`') && key.endsWith('`'))) {
+      if (key.length <= 1) break;
+      key = key.substring(1, key.length - 1).trim();
+    }
+    final urlMatch = RegExp(r'[?&]key=([a-zA-Z0-9_\-]+)').firstMatch(key);
+    if (urlMatch != null) {
+      key = urlMatch.group(1)!;
+    } else if (key.startsWith('key=')) {
+      key = key.substring(4);
+    } else if (key.startsWith('apiKey=')) {
+      key = key.substring(7);
+    }
+    return key.replaceAll(RegExp(r'\s+'), '');
+  }
+
+  static bool looksLikeGoogleApiKey(String key) {
+    return key.startsWith('AIza') && key.length >= 35;
+  }
 
   Future<String> generateFollowUp({
     required String apiKey,
@@ -2781,9 +2821,9 @@ class GeminiService {
     String tone = 'General Follow-up',
     String customInstructions = '',
   }) async {
-    final cleanKey = apiKey.trim();
+    final cleanKey = sanitizeApiKey(apiKey);
     if (cleanKey.isEmpty) {
-      throw const GeminiException('Please configure a valid Gemini API Key.');
+      throw const GeminiException('Please configure a valid Gemini API Key in Settings.');
     }
 
     final prompt = _buildPrompt(
@@ -2793,89 +2833,235 @@ class GeminiService {
       customInstructions: customInstructions,
     );
 
-    try {
-      final url = Uri.parse('$baseUrl?key=$cleanKey');
-      final response = await _client.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'contents': [
-            {
-              'parts': [
-                {'text': prompt}
-              ]
-            }
-          ],
-          'generationConfig': {
-            'temperature': 0.7,
-            'maxOutputTokens': 500,
-          },
-        }),
-      );
+    String? lastError;
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final candidates = data['candidates'] as List?;
-        if (candidates != null && candidates.isNotEmpty) {
-          final content = candidates.first['content'] as Map?;
-          final parts = content?['parts'] as List?;
-          if (parts != null && parts.isNotEmpty) {
-            final text = parts.first['text'] as String?;
-            if (text != null && text.trim().isNotEmpty) {
-              return text.trim();
+    for (final model in candidateModels) {
+      try {
+        final url = Uri.parse(
+          'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$cleanKey',
+        );
+        final response = await _client.post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'contents': [
+              {
+                'parts': [
+                  {'text': prompt}
+                ]
+              }
+            ],
+            'generationConfig': {
+              'temperature': 0.7,
+              'maxOutputTokens': 500,
+            },
+          }),
+        ).timeout(const Duration(seconds: 25));
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          final candidates = data['candidates'] as List?;
+          if (candidates != null && candidates.isNotEmpty) {
+            final content = candidates.first['content'] as Map?;
+            final parts = content?['parts'] as List?;
+            if (parts != null && parts.isNotEmpty) {
+              final text = parts.first['text'] as String?;
+              if (text != null && text.trim().isNotEmpty) {
+                return text.trim();
+              }
             }
           }
+          throw const GeminiException(
+            'Gemini did not return any message content.',
+          );
         }
-        throw const GeminiException(
-          'Gemini did not return any message content.',
-        );
-      } else {
+
+        String rawApiMessage = '';
         try {
           final errJson = jsonDecode(response.body);
-          final errMsg = errJson['error']?['message'] as String?;
-          if (errMsg != null && errMsg.isNotEmpty) {
-            throw GeminiException('Gemini API: $errMsg');
-          }
-        } catch (e) {
-          if (e is GeminiException) rethrow;
+          rawApiMessage = errJson['error']?['message'] as String? ?? '';
+        } catch (_) {}
+
+        if (response.statusCode == 404) {
+          lastError = rawApiMessage.isNotEmpty ? rawApiMessage : 'Model $model not found.';
+          continue;
         }
+
+        if (response.statusCode == 400 &&
+            (rawApiMessage.toLowerCase().contains('api key not valid') ||
+                rawApiMessage.toLowerCase().contains('api_key_invalid'))) {
+          throw const GeminiException(
+            'Invalid API Key: Google rejected this key. Please check your Gemini API key in Settings.',
+          );
+        }
+
+        if (rawApiMessage.isNotEmpty) {
+          throw GeminiException('Gemini API (${response.statusCode}): $rawApiMessage');
+        }
+
         throw GeminiException(
           'Gemini request failed (status ${response.statusCode}). Check your API key or network.',
         );
+      } on SocketException {
+        throw const GeminiException(
+          'No internet connection. Please check your network connection.',
+        );
+      } on TimeoutException {
+        throw const GeminiException(
+          'Request timed out. Google servers took too long to respond.',
+        );
+      } catch (e) {
+        if (e is GeminiException) rethrow;
+        lastError = e.toString();
       }
-    } on SocketException {
-      throw const GeminiException(
-        'No internet connection. Please check your network connection.',
-      );
     }
+
+    throw GeminiException(
+      lastError != null && lastError.isNotEmpty
+          ? lastError
+          : 'Could not connect to Gemini service. Please check your API key.',
+    );
   }
 
-  Future<bool> testConnection(String apiKey) async {
-    final cleanKey = apiKey.trim();
-    if (cleanKey.isEmpty) return false;
-
-    try {
-      final url = Uri.parse('$baseUrl?key=$cleanKey');
-      final response = await _client.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'contents': [
-            {
-              'parts': [
-                {'text': 'Ping'}
-              ]
-            }
-          ],
-          'generationConfig': {
-            'maxOutputTokens': 5,
-          },
-        }),
+  Future<GeminiTestResult> testConnection(String apiKey) async {
+    final cleanKey = sanitizeApiKey(apiKey);
+    if (cleanKey.isEmpty) {
+      return const GeminiTestResult(
+        isSuccess: false,
+        message: 'API Key is empty. Please enter your Gemini API key.',
       );
-      return response.statusCode == 200;
-    } catch (_) {
-      return false;
     }
+
+    String? lastErrorMessage;
+    int? lastStatusCode;
+
+    for (final model in candidateModels) {
+      try {
+        final url = Uri.parse(
+          'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$cleanKey',
+        );
+        final response = await _client.post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'contents': [
+              {
+                'parts': [
+                  {'text': 'Ping'}
+                ]
+              }
+            ],
+            'generationConfig': {
+              'maxOutputTokens': 5,
+            },
+          }),
+        ).timeout(const Duration(seconds: 15));
+
+        lastStatusCode = response.statusCode;
+
+        if (response.statusCode == 200) {
+          return GeminiTestResult(
+            isSuccess: true,
+            modelName: model,
+            statusCode: 200,
+            message:
+                '✅ Connection successful!\nConnected to Google Gemini ($model).\nAI messaging is ready to use.',
+          );
+        }
+
+        String rawApiMessage = '';
+        try {
+          final bodyJson = jsonDecode(response.body);
+          if (bodyJson is Map && bodyJson['error'] is Map) {
+            final err = bodyJson['error'] as Map;
+            rawApiMessage = (err['message'] as String?) ?? '';
+          }
+        } catch (_) {}
+
+        if (response.statusCode == 404) {
+          lastErrorMessage = rawApiMessage.isNotEmpty ? rawApiMessage : 'Model $model not found.';
+          continue;
+        }
+
+        final isInvalidKey = response.statusCode == 400 &&
+            (rawApiMessage.toLowerCase().contains('api key not valid') ||
+                rawApiMessage.toLowerCase().contains('api_key_invalid') ||
+                rawApiMessage.toLowerCase().contains('invalid api key'));
+
+        final isLocationBlocked = rawApiMessage
+            .toLowerCase()
+            .contains('user location is not supported');
+        final isQuotaExhausted = response.statusCode == 429 ||
+            rawApiMessage.toLowerCase().contains('resource has been exhausted');
+
+        final buffer = StringBuffer();
+        if (isInvalidKey) {
+          buffer.writeln('❌ Google rejected this API key (Invalid API Key).');
+          buffer.writeln();
+          if (!looksLikeGoogleApiKey(cleanKey)) {
+            buffer.writeln(
+              '⚠️ Key format warning: Google Gemini API keys usually start with "AIzaSy" (~39 characters). Make sure you copied the API Key, not the Google Cloud Project ID or Name.',
+            );
+            buffer.writeln();
+          }
+          buffer.writeln(
+            '• Newly created keys in Google AI Studio often take 30–60 seconds to activate worldwide across Google servers. If you just created it, please wait ~30 seconds and test again.',
+          );
+          buffer.writeln('• Ensure you copied the entire key without extra text.');
+        } else if (isLocationBlocked) {
+          buffer.writeln(
+            '❌ Region Not Supported: Google Gemini API is currently not available from your IP/region without VPN.',
+          );
+        } else if (isQuotaExhausted) {
+          buffer.writeln(
+            '❌ Quota Exceeded (429): Google AI Studio free rate limit reached. Please wait a minute and try again.',
+          );
+        } else {
+          buffer.writeln('❌ Google API Error (Status ${response.statusCode}):');
+          if (rawApiMessage.isNotEmpty) {
+            buffer.writeln(rawApiMessage);
+          } else {
+            buffer.writeln('Connection rejected by server.');
+          }
+        }
+
+        return GeminiTestResult(
+          isSuccess: false,
+          statusCode: response.statusCode,
+          message: buffer.toString().trim(),
+        );
+      } on SocketException {
+        return const GeminiTestResult(
+          isSuccess: false,
+          message:
+              '❌ No internet connection. Could not reach Google servers. Please check your Wi-Fi or mobile data.',
+        );
+      } on TimeoutException {
+        return const GeminiTestResult(
+          isSuccess: false,
+          message:
+              '❌ Connection timed out. Google servers took too long to respond. Please check your network.',
+        );
+      } on HandshakeException {
+        return const GeminiTestResult(
+          isSuccess: false,
+          message:
+              '❌ SSL/TLS handshake failed with Google servers. Please verify device date and time.',
+        );
+      } catch (e) {
+        return GeminiTestResult(
+          isSuccess: false,
+          message: '❌ Unexpected error testing connection: $e',
+        );
+      }
+    }
+
+    return GeminiTestResult(
+      isSuccess: false,
+      statusCode: lastStatusCode,
+      message:
+          '❌ Could not connect to Gemini models.\n${lastErrorMessage ?? "Please verify your key in Google AI Studio."}',
+    );
   }
 
   String _buildPrompt({
@@ -6934,7 +7120,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.12.0',
+                    'LeadPilot v1.12.1',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,
@@ -7998,8 +8184,9 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
   }
 
   Future<void> _saveKey() async {
-    final key = _controller.text.trim();
-    await widget.settingsStore.saveGeminiApiKey(key);
+    final cleanKey = GeminiService.sanitizeApiKey(_controller.text);
+    _controller.text = cleanKey;
+    await widget.settingsStore.saveGeminiApiKey(cleanKey);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Gemini API Key saved successfully!')),
@@ -8008,8 +8195,13 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
   }
 
   Future<void> _testConnection() async {
-    final key = _controller.text.trim();
-    if (key.isEmpty) {
+    final rawKey = _controller.text;
+    final cleanKey = GeminiService.sanitizeApiKey(rawKey);
+    if (cleanKey != rawKey) {
+      _controller.text = cleanKey;
+    }
+
+    if (cleanKey.isEmpty) {
       setState(() {
         _testResult = 'Please enter an API Key to test.';
         _isSuccess = false;
@@ -8021,14 +8213,12 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
       _testResult = null;
     });
 
-    final success = await _geminiService.testConnection(key);
+    final result = await _geminiService.testConnection(cleanKey);
     if (!mounted) return;
     setState(() {
       _isTesting = false;
-      _isSuccess = success;
-      _testResult = success
-          ? '✅ Connection successful! Gemini is ready for follow-up messaging.'
-          : '❌ Connection failed. Please check your API key.';
+      _isSuccess = result.isSuccess;
+      _testResult = result.message;
     });
   }
 
@@ -8039,9 +8229,10 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
 
   Future<void> _pasteFromClipboard() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
-    final text = data?.text?.trim() ?? '';
-    if (text.isNotEmpty) {
-      setState(() => _controller.text = text);
+    final text = data?.text ?? '';
+    final clean = GeminiService.sanitizeApiKey(text);
+    if (clean.isNotEmpty) {
+      setState(() => _controller.text = clean);
     }
   }
 
@@ -8190,7 +8381,16 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
                   ),
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
+              Text(
+                '💡 Gemini API keys start with "AIzaSy..." (~39 chars). Newly created keys can take 30–60s to activate across Google servers.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontSize: 11,
+                  height: 1.3,
+                ),
+              ),
+              const SizedBox(height: 6),
               Row(
                 children: [
                   TextButton.icon(
@@ -8209,20 +8409,26 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
               if (_testResult != null) ...[
                 const SizedBox(height: 8),
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: _isSuccess
                         ? const Color(0xFF159A76).withValues(alpha: 0.12)
                         : theme.colorScheme.errorContainer.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _isSuccess
+                          ? const Color(0xFF159A76).withValues(alpha: 0.3)
+                          : theme.colorScheme.error.withValues(alpha: 0.3),
+                    ),
                   ),
-                  child: Text(
+                  child: SelectableText(
                     _testResult!,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: _isSuccess
                           ? const Color(0xFF159A76)
                           : theme.colorScheme.error,
                       fontWeight: FontWeight.w600,
+                      height: 1.45,
                     ),
                   ),
                 ),
@@ -8342,15 +8548,16 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
   }
 
   Future<void> _saveApiKey() async {
-    final key = _apiKeyController.text.trim();
-    if (key.isEmpty) {
+    final cleanKey = GeminiService.sanitizeApiKey(_apiKeyController.text);
+    _apiKeyController.text = cleanKey;
+    if (cleanKey.isEmpty) {
       setState(() => _errorMessage = 'Please paste a valid Gemini API Key.');
       return;
     }
-    await widget.settingsStore.saveGeminiApiKey(key);
+    await widget.settingsStore.saveGeminiApiKey(cleanKey);
     if (!mounted) return;
     setState(() {
-      _apiKey = key;
+      _apiKey = cleanKey;
       _errorMessage = null;
     });
     await _generateMessage();
@@ -8387,9 +8594,10 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
 
   Future<void> _pasteFromClipboard() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
-    final text = data?.text?.trim() ?? '';
-    if (text.isNotEmpty) {
-      _apiKeyController.text = text;
+    final text = data?.text ?? '';
+    final clean = GeminiService.sanitizeApiKey(text);
+    if (clean.isNotEmpty) {
+      _apiKeyController.text = clean;
     }
   }
 
