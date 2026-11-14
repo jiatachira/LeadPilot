@@ -2722,9 +2722,14 @@ class GoogleSheetService {
         )
         .timeout(_timeout);
     final redirectLocation = Uri.tryParse(response.headers['location'] ?? '');
+    final redirectHost = redirectLocation?.host.toLowerCase() ?? '';
     final isAppsScriptContentRedirect =
-        (response.statusCode == 302 || response.statusCode == 303) &&
-        redirectLocation?.host == 'script.googleusercontent.com';
+        (response.statusCode == 302 ||
+            response.statusCode == 303 ||
+            response.statusCode == 307) &&
+        (redirectHost == 'script.googleusercontent.com' ||
+            redirectHost.endsWith('.googleusercontent.com') ||
+            redirectHost.endsWith('google.com'));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       // Apps Script executes doPost before redirecting ContentService output.
       if (isAppsScriptContentRedirect) return;
@@ -3282,7 +3287,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       });
       _showMessage('Student details updated and synced to Google Sheets.');
-    } on Exception catch (error) {
+    } catch (error) {
       if (!mounted) return;
       await _enqueueOfflineAction(
         QueuedSheetAction(
@@ -3301,6 +3306,12 @@ class _HomeScreenState extends State<HomeScreen> {
       _showMessage(
         'Details updated locally, but could not be synced. $error',
       );
+    } finally {
+      if (mounted && _isSyncing) {
+        setState(() {
+          _isSyncing = false;
+        });
+      }
     }
   }
 
@@ -4659,7 +4670,6 @@ class StudentCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final activity = studentActivityStatus(student);
-    final hasActivityStatus = activity.level != StudentActivityLevel.unknown;
     final statusColor = switch (student.callStatus) {
       'Very Interested' || 'Interested' || 'Answered' => _green,
       'Minimal Interested' ||
@@ -4684,12 +4694,10 @@ class StudentCard extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
         side: BorderSide(
-          color: hasActivityStatus
-              ? activity.color
-              : isDark
+          color: isDark
               ? const Color(0xFF344453)
               : const Color(0xFFF0F2F5),
-          width: hasActivityStatus ? 1.5 : 1,
+          width: 1,
         ),
       ),
       clipBehavior: Clip.antiAlias,
@@ -4700,29 +4708,47 @@ class StudentCard extends StatelessWidget {
           padding: const EdgeInsets.all(14),
           child: Row(
             children: [
-              CircleAvatar(
-                radius: 25,
-                backgroundColor: isSelectionMode && isSelected
-                    ? _green
-                    : isDark
-                    ? const Color(0xFF17382F)
-                    : const Color(0xFFEAF3F1),
-                child: isSelectionMode
-                    ? Icon(
-                        isSelected
-                            ? Icons.check_rounded
-                            : Icons.circle_outlined,
-                        color: isSelected
-                            ? Colors.white
-                            : Theme.of(context).colorScheme.onSurfaceVariant,
-                      )
-                    : Text(
-                        student.initials,
-                        style: const TextStyle(
-                          color: _green,
-                          fontWeight: FontWeight.w800,
+              Badge(
+                isLabelVisible:
+                    !isSelectionMode && activity.unansweredStreak >= 3,
+                alignment: Alignment.topRight,
+                backgroundColor: activity.unansweredStreak >= 5
+                    ? const Color(0xFFD64545)
+                    : const Color(0xFFE58A18),
+                largeSize: 18,
+                padding: const EdgeInsets.symmetric(horizontal: 5),
+                label: Text(
+                  '${activity.unansweredStreak}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 10,
+                    color: Colors.white,
+                  ),
+                ),
+                child: CircleAvatar(
+                  radius: 25,
+                  backgroundColor: isSelectionMode && isSelected
+                      ? _green
+                      : isDark
+                      ? const Color(0xFF17382F)
+                      : const Color(0xFFEAF3F1),
+                  child: isSelectionMode
+                      ? Icon(
+                          isSelected
+                              ? Icons.check_rounded
+                              : Icons.circle_outlined,
+                          color: isSelected
+                              ? Colors.white
+                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                        )
+                      : Text(
+                          student.initials,
+                          style: const TextStyle(
+                            color: _green,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
-                      ),
+                ),
               ),
               const SizedBox(width: 13),
               Expanded(

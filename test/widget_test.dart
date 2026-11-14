@@ -355,13 +355,53 @@ void main() {
 
     final card = tester.widget<Card>(find.byType(Card).first);
     final shape = card.shape! as RoundedRectangleBorder;
-    expect(shape.side.color, const Color(0xFFE58A18));
-    expect(shape.side.width, 1.5);
+    expect(shape.side.color, const Color(0xFFF0F2F5));
+    expect(shape.side.width, 1.0);
     expect(find.text('0700000000'), findsOneWidget);
     final name = tester.widget<Text>(find.text(fullName));
     expect(name.maxLines, isNull);
     expect(name.overflow, isNull);
     expect(find.text('3d'), findsNothing);
+  });
+
+  testWidgets('displays avatar corner badge for 3x and 5x unanswered streaks', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    final student = Student(
+      name: 'Badge Student',
+      phone: '0700000000',
+      attempts: [
+        for (int i = 3; i >= 1; i--)
+          CallAttempt(
+            dateTime: now.subtract(Duration(hours: i)).toIso8601String(),
+            status: 'No Answer',
+            comment: '',
+          ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StudentCard(
+            student: student,
+            onTap: () {},
+            onLongPress: () {},
+            onCall: () {},
+            onWhatsApp: () {},
+            onSms: () {},
+            onNote: () {},
+            onSaveContact: () {},
+          ),
+        ),
+      ),
+    );
+
+    final badge = tester.widget<Badge>(find.byType(Badge).first);
+    expect(badge.isLabelVisible, isTrue);
+    expect(badge.backgroundColor, const Color(0xFFE58A18));
+    expect(find.text('3'), findsOneWidget);
   });
 
   test('includes every same-time reminder in the grouped notification', () {
