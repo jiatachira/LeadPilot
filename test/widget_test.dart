@@ -2244,7 +2244,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.11.4'), findsOneWidget);
+    expect(find.text('LeadPilot v1.12.0'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -2282,5 +2282,78 @@ void main() {
     expect(find.textContaining('not recognised'), findsNothing);
     expect(find.text('Welcome Back'), findsOneWidget);
     expect(find.text('Use fingerprint or enter your PIN.'), findsOneWidget);
+  });
+
+  test(
+      'GeminiService generates follow-up message using student context and mock client',
+      () async {
+    final mockClient = MockClient((request) async {
+      expect(request.url.queryParameters['key'], 'test_api_key_123');
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      final promptText = body['contents'][0]['parts'][0]['text'] as String;
+      expect(promptText.contains('Kamal Perera'), isTrue);
+      expect(promptText.contains('2026 A/L'), isTrue);
+      expect(promptText.contains('Asked about fee'), isTrue);
+
+      return http.Response(
+        jsonEncode({
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {
+                    'text':
+                        'Hello Kamal, following up on your class fee inquiry!'
+                  }
+                ]
+              }
+            }
+          ]
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
+    final service = GeminiService(client: mockClient);
+    const student = Student(
+      name: 'Kamal Perera',
+      phone: '0771234567',
+      examType: '2026 A/L',
+      callStatus: 'Interested',
+      comment: 'Asked about fee',
+    );
+
+    final msg = await service.generateFollowUp(
+      apiKey: 'test_api_key_123',
+      student: student,
+      language: 'English',
+      tone: 'Class Details & Fees',
+    );
+
+    expect(msg, 'Hello Kamal, following up on your class fee inquiry!');
+  });
+
+  testWidgets(
+      'WhatsApp choice sheet displays Generate with AI option and Gemini badge',
+      (tester) async {
+    const student = Student(
+      name: 'Kamal Perera',
+      phone: '0771234567',
+    );
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: WhatsAppChoiceSheet(student: student),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Custom'), findsOneWidget);
+    expect(find.text('Template'), findsOneWidget);
+    expect(find.text('Generate with AI'), findsOneWidget);
+    expect(find.text('Gemini'), findsOneWidget);
   });
 }

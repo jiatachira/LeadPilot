@@ -657,6 +657,10 @@ abstract interface class AppSettingsStore {
   Future<List<WhatsAppTemplate>> readWhatsAppTemplates();
 
   Future<void> saveWhatsAppTemplates(List<WhatsAppTemplate> templates);
+
+  Future<String> readGeminiApiKey();
+
+  Future<void> saveGeminiApiKey(String key);
 }
 
 class SecureAppSettingsStore implements AppSettingsStore {
@@ -672,6 +676,7 @@ class SecureAppSettingsStore implements AppSettingsStore {
   static const _offlineQueueKey = 'student_call_offline_queue';
   static const _cachedStudentsKey = 'student_call_cached_students';
   static const _whatsAppTemplatesKey = 'student_call_whatsapp_templates';
+  static const _geminiApiKeyKey = 'student_call_gemini_api_key';
   final FlutterSecureStorage _storage;
 
   @override
@@ -795,6 +800,14 @@ class SecureAppSettingsStore implements AppSettingsStore {
       );
 
   @override
+  Future<String> readGeminiApiKey() async =>
+      await _storage.read(key: _geminiApiKeyKey) ?? '';
+
+  @override
+  Future<void> saveGeminiApiKey(String key) =>
+      _storage.write(key: _geminiApiKeyKey, value: key.trim());
+
+  @override
   Future<void> saveSheetConfig(String url, {String name = ''}) async {
     final normalizedUrl = url.trim();
     final linkedSheets = await readLinkedSheets();
@@ -830,6 +843,7 @@ class MemoryAppSettingsStore implements AppSettingsStore {
   String sheetName = '';
   ThemeMode themeMode = ThemeMode.system;
   bool biometricEnabled = false;
+  String geminiApiKey = '';
   final List<LinkedSheet> linkedSheets = [];
 
   @override
@@ -909,6 +923,14 @@ class MemoryAppSettingsStore implements AppSettingsStore {
   @override
   Future<void> saveWhatsAppTemplates(List<WhatsAppTemplate> templates) async {
     whatsAppTemplates = List.of(templates);
+  }
+
+  @override
+  Future<String> readGeminiApiKey() async => geminiApiKey;
+
+  @override
+  Future<void> saveGeminiApiKey(String key) async {
+    geminiApiKey = key.trim();
   }
 }
 
@@ -2726,11 +2748,179 @@ enum _SettingsAction {
   reports,
   saveContacts,
   whatsAppTemplates,
+  geminiAi,
 }
 
 enum _StudentCardAction { edit, selectMultiple }
 
 enum _LeadReportAction { notInterested, notPotential, inactive }
+
+class GeminiException implements Exception {
+  const GeminiException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+class GeminiService {
+  GeminiService({http.Client? client})
+    : _client = client ?? http.Client();
+
+  final http.Client _client;
+
+  static const String geminiModel = 'gemini-1.5-flash';
+  static const String baseUrl =
+      'https://generativelanguage.googleapis.com/v1beta/models/$geminiModel:generateContent';
+
+  Future<String> generateFollowUp({
+    required String apiKey,
+    required Student student,
+    String language = 'Sinhala',
+    String tone = 'General Follow-up',
+    String customInstructions = '',
+  }) async {
+    final cleanKey = apiKey.trim();
+    if (cleanKey.isEmpty) {
+      throw const GeminiException('Please configure a valid Gemini API Key.');
+    }
+
+    final prompt = _buildPrompt(
+      student: student,
+      language: language,
+      tone: tone,
+      customInstructions: customInstructions,
+    );
+
+    try {
+      final url = Uri.parse('$baseUrl?key=$cleanKey');
+      final response = await _client.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'parts': [
+                {'text': prompt}
+              ]
+            }
+          ],
+          'generationConfig': {
+            'temperature': 0.7,
+            'maxOutputTokens': 500,
+          },
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final candidates = data['candidates'] as List?;
+        if (candidates != null && candidates.isNotEmpty) {
+          final content = candidates.first['content'] as Map?;
+          final parts = content?['parts'] as List?;
+          if (parts != null && parts.isNotEmpty) {
+            final text = parts.first['text'] as String?;
+            if (text != null && text.trim().isNotEmpty) {
+              return text.trim();
+            }
+          }
+        }
+        throw const GeminiException(
+          'Gemini did not return any message content.',
+        );
+      } else {
+        try {
+          final errJson = jsonDecode(response.body);
+          final errMsg = errJson['error']?['message'] as String?;
+          if (errMsg != null && errMsg.isNotEmpty) {
+            throw GeminiException('Gemini API: $errMsg');
+          }
+        } catch (e) {
+          if (e is GeminiException) rethrow;
+        }
+        throw GeminiException(
+          'Gemini request failed (status ${response.statusCode}). Check your API key or network.',
+        );
+      }
+    } on SocketException {
+      throw const GeminiException(
+        'No internet connection. Please check your network connection.',
+      );
+    }
+  }
+
+  Future<bool> testConnection(String apiKey) async {
+    final cleanKey = apiKey.trim();
+    if (cleanKey.isEmpty) return false;
+
+    try {
+      final url = Uri.parse('$baseUrl?key=$cleanKey');
+      final response = await _client.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'parts': [
+                {'text': 'Ping'}
+              ]
+            }
+          ],
+          'generationConfig': {
+            'maxOutputTokens': 5,
+          },
+        }),
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  String _buildPrompt({
+    required Student student,
+    required String language,
+    required String tone,
+    required String customInstructions,
+  }) {
+    final streak = studentActivityStatus(student).unansweredStreak;
+    final streakNote = streak >= 3
+        ? ' ($streak x consecutive unanswered attempts)'
+        : '';
+    final lastNote = student.comment.trim().isNotEmpty
+        ? student.comment.trim()
+        : (student.commentHistory.isNotEmpty
+            ? student.commentHistory.last.trim()
+            : 'No call comment yet');
+    final examDetails = [student.examType, student.examYear]
+        .where((s) => s.trim().isNotEmpty)
+        .join(' ');
+
+    return '''
+You are a polite, helpful student coordinator / assistant for an educational institute or tutor in Sri Lanka.
+Write a personalized, concise WhatsApp follow-up message to a student lead with the following context:
+
+- Student Name: ${student.name}
+- Stream/Class: ${examDetails.isNotEmpty ? examDetails : 'General Course'}
+- Call Status: ${student.callStatus}$streakNote
+- Recent Call Note/Comment: "$lastNote"
+- Location/Town: ${student.location.isNotEmpty ? student.location : 'Not specified'}
+- Message Goal/Tone: $tone
+- Desired Language: $language
+${customInstructions.trim().isNotEmpty ? '- Extra Instruction: "${customInstructions.trim()}"' : ''}
+
+Rules:
+1. Address the student warmly by name.
+2. If Language is "Sinhala", write in natural, polite conversational Sinhala (සිංහල).
+3. If Language is "Singlish", write in natural conversational Sinhala typed in English letters (Singlish).
+4. If Language is "English", write in clear, polite Sri Lankan English.
+5. Directly address the situation from the call note (e.g. if we couldn't connect, or if following up on class fees/details as requested).
+6. Format nicely for WhatsApp (brief paragraphs, tasteful emojis).
+7. Return ONLY the final message text to be sent directly on WhatsApp. Do not include quotes around the whole text, markdown title/codeblocks, or introductory explanations.
+''';
+  }
+}
 
 class SheetApiException implements Exception {
   const SheetApiException(this.message);
@@ -3558,6 +3748,7 @@ class _HomeScreenState extends State<HomeScreen> {
         biometricEnabled: widget.biometricEnabled,
         onBiometricChanged: widget.onBiometricChanged,
         students: _students,
+        settingsStore: _settingsStore,
       ),
     );
     if (!mounted || action == null) return;
@@ -3580,7 +3771,21 @@ class _HomeScreenState extends State<HomeScreen> {
       case _SettingsAction.whatsAppTemplates:
         await _openWhatsAppTemplatesSettings();
         break;
+      case _SettingsAction.geminiAi:
+        await _openGeminiAiSettings();
+        break;
     }
+  }
+
+  Future<void> _openGeminiAiSettings() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ManageGeminiAiSheet(
+        settingsStore: _settingsStore,
+      ),
+    );
   }
 
   Future<void> _openWhatsAppTemplatesSettings() async {
@@ -4186,8 +4391,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final choice = await showModalBottomSheet<_WhatsAppChoice>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _WhatsAppChoiceSheet(student: student),
+      builder: (_) => WhatsAppChoiceSheet(student: student),
     );
 
     if (choice == null || !mounted) return;
@@ -4212,6 +4418,24 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       if (selectedMessage != null && mounted) {
         await _launchWhatsApp(number, text: selectedMessage);
+      }
+    } else if (choice == _WhatsAppChoice.ai) {
+      final apiKey = await _settingsStore.readGeminiApiKey();
+      if (!mounted) return;
+      final selectedMessage = await showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => GeminiAiMessageSheet(
+          student: student,
+          initialApiKey: apiKey,
+          settingsStore: _settingsStore,
+        ),
+      );
+      if (selectedMessage != null &&
+          selectedMessage.trim().isNotEmpty &&
+          mounted) {
+        await _launchWhatsApp(number, text: selectedMessage.trim());
       }
     }
   }
@@ -6236,6 +6460,7 @@ class _SettingsHubSheet extends StatefulWidget {
     required this.biometricEnabled,
     required this.onBiometricChanged,
     this.students = const [],
+    this.settingsStore,
   });
 
   final ThemeMode themeMode;
@@ -6245,6 +6470,7 @@ class _SettingsHubSheet extends StatefulWidget {
   final bool biometricEnabled;
   final Future<void> Function(bool) onBiometricChanged;
   final List<Student> students;
+  final AppSettingsStore? settingsStore;
 
   @override
   State<_SettingsHubSheet> createState() => _SettingsHubSheetState();
@@ -6255,11 +6481,20 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
   bool _hasOverlayPermission = false;
   bool _hasPhonePermissions = false;
   int _cachedCount = 0;
+  String _geminiApiKey = '';
 
   @override
   void initState() {
     super.initState();
     _loadCallerIdState();
+    _loadGeminiState();
+  }
+
+  Future<void> _loadGeminiState() async {
+    final key = await widget.settingsStore?.readGeminiApiKey() ?? '';
+    if (mounted) {
+      setState(() => _geminiApiKey = key);
+    }
   }
 
   Future<void> _loadCallerIdState() async {
@@ -6511,6 +6746,28 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                         _SettingsAction.whatsAppTemplates,
                       ),
                     ),
+                    Divider(
+                      height: 1,
+                      indent: 56,
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                    ListTile(
+                      leading: const Icon(
+                        Icons.auto_awesome_rounded,
+                        color: Color(0xFF8B5CF6),
+                      ),
+                      title: const Text('Gemini AI Assistant'),
+                      subtitle: Text(
+                        _geminiApiKey.trim().isEmpty
+                            ? 'Connect free API key for smart follow-ups'
+                            : 'Connected • Ready for AI messaging',
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => Navigator.pop(
+                        context,
+                        _SettingsAction.geminiAi,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -6677,7 +6934,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.11.4',
+                    'LeadPilot v1.12.0',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,
@@ -7013,10 +7270,10 @@ class _ConnectionBadge extends StatelessWidget {
   }
 }
 
-enum _WhatsAppChoice { custom, template }
+enum _WhatsAppChoice { custom, template, ai }
 
-class _WhatsAppChoiceSheet extends StatelessWidget {
-  const _WhatsAppChoiceSheet({required this.student});
+class WhatsAppChoiceSheet extends StatelessWidget {
+  const WhatsAppChoiceSheet({super.key, required this.student});
 
   final Student student;
 
@@ -7038,65 +7295,110 @@ class _WhatsAppChoiceSheet extends StatelessWidget {
       ),
       child: SafeArea(
         top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: Container(
-                height: 4,
-                width: 40,
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? const Color(0xFF526170)
-                      : const Color(0xFFDDE3E9),
-                  borderRadius: BorderRadius.circular(4),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  height: 4,
+                  width: 40,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF526170)
+                        : const Color(0xFFDDE3E9),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 18),
-            Text(
-              'Send WhatsApp Message',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w800,
+              const SizedBox(height: 18),
+              Text(
+                'Send WhatsApp Message',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Message to ${student.name}',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+              const SizedBox(height: 4),
+              Text(
+                'Message to ${student.name}',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
-            ),
-            const SizedBox(height: 18),
-            Card(
-              color: theme.colorScheme.surfaceContainerLow,
-              child: Column(
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.chat_bubble_outline),
-                    title: const Text('Custom'),
-                    subtitle: const Text('Open WhatsApp with a blank chat'),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => Navigator.pop(context, _WhatsAppChoice.custom),
-                  ),
-                  Divider(
-                    height: 1,
-                    indent: 56,
-                    color: theme.colorScheme.outlineVariant,
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.text_snippet_outlined),
-                    title: const Text('Template'),
-                    subtitle: const Text('Choose a pre-written message template'),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () =>
-                        Navigator.pop(context, _WhatsAppChoice.template),
-                  ),
-                ],
+              const SizedBox(height: 18),
+              Card(
+                color: theme.colorScheme.surfaceContainerLow,
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.chat_bubble_outline),
+                      title: const Text('Custom'),
+                      subtitle: const Text('Open WhatsApp with a blank chat'),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () =>
+                          Navigator.pop(context, _WhatsAppChoice.custom),
+                    ),
+                    Divider(
+                      height: 1,
+                      indent: 56,
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.text_snippet_outlined),
+                      title: const Text('Template'),
+                      subtitle:
+                          const Text('Choose a pre-written message template'),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () =>
+                          Navigator.pop(context, _WhatsAppChoice.template),
+                    ),
+                    Divider(
+                      height: 1,
+                      indent: 56,
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                    ListTile(
+                      leading: const Icon(
+                        Icons.auto_awesome_rounded,
+                        color: Color(0xFF8B5CF6),
+                      ),
+                      title: Row(
+                        children: [
+                          const Text('Generate with AI'),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF8B5CF6)
+                                  .withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text(
+                              'Gemini',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF8B5CF6),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      subtitle: const Text(
+                        'Personalized message based on call notes',
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => Navigator.pop(context, _WhatsAppChoice.ai),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -7646,6 +7948,859 @@ class _ManageWhatsAppTemplatesSheetState
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class ManageGeminiAiSheet extends StatefulWidget {
+  const ManageGeminiAiSheet({
+    super.key,
+    required this.settingsStore,
+    this.geminiService,
+  });
+
+  final AppSettingsStore settingsStore;
+  final GeminiService? geminiService;
+
+  @override
+  State<ManageGeminiAiSheet> createState() => _ManageGeminiAiSheetState();
+}
+
+class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
+  late final TextEditingController _controller;
+  late final GeminiService _geminiService;
+  bool _obscure = true;
+  bool _isTesting = false;
+  String? _testResult;
+  bool _isSuccess = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+    _geminiService = widget.geminiService ?? GeminiService();
+    _loadKey();
+  }
+
+  Future<void> _loadKey() async {
+    final key = await widget.settingsStore.readGeminiApiKey();
+    if (mounted) {
+      setState(() => _controller.text = key);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveKey() async {
+    final key = _controller.text.trim();
+    await widget.settingsStore.saveGeminiApiKey(key);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Gemini API Key saved successfully!')),
+    );
+    Navigator.pop(context);
+  }
+
+  Future<void> _testConnection() async {
+    final key = _controller.text.trim();
+    if (key.isEmpty) {
+      setState(() {
+        _testResult = 'Please enter an API Key to test.';
+        _isSuccess = false;
+      });
+      return;
+    }
+    setState(() {
+      _isTesting = true;
+      _testResult = null;
+    });
+
+    final success = await _geminiService.testConnection(key);
+    if (!mounted) return;
+    setState(() {
+      _isTesting = false;
+      _isSuccess = success;
+      _testResult = success
+          ? '✅ Connection successful! Gemini is ready for follow-up messaging.'
+          : '❌ Connection failed. Please check your API key.';
+    });
+  }
+
+  Future<void> _openGoogleAiStudio() async {
+    final uri = Uri.parse('https://aistudio.google.com/app/apikey');
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _pasteFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim() ?? '';
+    if (text.isNotEmpty) {
+      setState(() => _controller.text = text);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final hasKey = _controller.text.trim().isNotEmpty;
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        22,
+        12,
+        22,
+        MediaQuery.viewInsetsOf(context).bottom + 24,
+      ),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  height: 4,
+                  width: 40,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF526170)
+                        : const Color(0xFFDDE3E9),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.auto_awesome_rounded,
+                      color: Color(0xFF8B5CF6),
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Gemini AI Assistant',
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          'Connect your free Google Gemini API key',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              Card(
+                color: theme.colorScheme.surfaceContainerLow,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            hasKey
+                                ? Icons.check_circle_rounded
+                                : Icons.info_outline_rounded,
+                            color: hasKey
+                                ? const Color(0xFF159A76)
+                                : const Color(0xFF8B5CF6),
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            hasKey ? 'API Key Configured' : '100% Free API Access',
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: hasKey
+                                  ? const Color(0xFF159A76)
+                                  : const Color(0xFF8B5CF6),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Google AI Studio offers 1,500 requests per day for Gemini 1.5 Flash completely free (no credit card required). You can create an API key in under 1 minute.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: _openGoogleAiStudio,
+                        icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                        label: const Text('Get Free Key (Google AI Studio)'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF8B5CF6),
+                          side: const BorderSide(color: Color(0xFF8B5CF6)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _controller,
+                obscureText: _obscure,
+                decoration: InputDecoration(
+                  labelText: 'Gemini API Key',
+                  hintText: 'Paste key (starts with AIzaSy...)',
+                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.key_rounded),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscure
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                    onPressed: () => setState(() => _obscure = !_obscure),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: _pasteFromClipboard,
+                    icon: const Icon(Icons.paste_rounded, size: 16),
+                    label: const Text('Paste from clipboard'),
+                  ),
+                  const Spacer(),
+                  if (_controller.text.trim().isNotEmpty)
+                    TextButton(
+                      onPressed: () => setState(() => _controller.clear()),
+                      child: const Text('Clear'),
+                    ),
+                ],
+              ),
+              if (_testResult != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: _isSuccess
+                        ? const Color(0xFF159A76).withValues(alpha: 0.12)
+                        : theme.colorScheme.errorContainer.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    _testResult!,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: _isSuccess
+                          ? const Color(0xFF159A76)
+                          : theme.colorScheme.error,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _isTesting ? null : _testConnection,
+                      icon: _isTesting
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.bolt_rounded, size: 18),
+                      label: Text(_isTesting ? 'Testing...' : 'Test Key'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _saveKey,
+                      icon: const Icon(Icons.save_rounded, size: 18),
+                      label: const Text('Save Key'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF8B5CF6),
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class GeminiAiMessageSheet extends StatefulWidget {
+  const GeminiAiMessageSheet({
+    super.key,
+    required this.student,
+    required this.initialApiKey,
+    required this.settingsStore,
+    this.geminiService,
+  });
+
+  final Student student;
+  final String initialApiKey;
+  final AppSettingsStore settingsStore;
+  final GeminiService? geminiService;
+
+  @override
+  State<GeminiAiMessageSheet> createState() => _GeminiAiMessageSheetState();
+}
+
+class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
+  late String _apiKey;
+  late final TextEditingController _apiKeyController;
+  late final TextEditingController _customInstructionController;
+  late final TextEditingController _messageController;
+  late final GeminiService _geminiService;
+
+  String _selectedLanguage = 'Sinhala';
+  String _selectedTone = 'General Follow-up';
+  bool _isGenerating = false;
+  String? _errorMessage;
+  bool _obscureApiKey = true;
+
+  final List<String> _languages = const ['Sinhala', 'Singlish', 'English'];
+  final List<String> _tones = const [
+    'General Follow-up',
+    'Missed Call',
+    'Class Details & Fees',
+    'Friendly Reminder',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _apiKey = widget.initialApiKey.trim();
+    _apiKeyController = TextEditingController(text: _apiKey);
+    _customInstructionController = TextEditingController();
+    _messageController = TextEditingController();
+    _geminiService = widget.geminiService ?? GeminiService();
+
+    final st = widget.student.callStatus.toLowerCase();
+    final streak = studentActivityStatus(widget.student).unansweredStreak;
+    if (st.contains('no answer') ||
+        st.contains('busy') ||
+        st.contains('call cut') ||
+        streak >= 2) {
+      _selectedTone = 'Missed Call';
+    } else if (st.contains('interest') || st.contains('register')) {
+      _selectedTone = 'Class Details & Fees';
+    } else if (st.contains('follow') || st.contains('pending')) {
+      _selectedTone = 'General Follow-up';
+    }
+
+    if (_apiKey.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _generateMessage();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _apiKeyController.dispose();
+    _customInstructionController.dispose();
+    _messageController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveApiKey() async {
+    final key = _apiKeyController.text.trim();
+    if (key.isEmpty) {
+      setState(() => _errorMessage = 'Please paste a valid Gemini API Key.');
+      return;
+    }
+    await widget.settingsStore.saveGeminiApiKey(key);
+    if (!mounted) return;
+    setState(() {
+      _apiKey = key;
+      _errorMessage = null;
+    });
+    await _generateMessage();
+  }
+
+  Future<void> _generateMessage() async {
+    if (_apiKey.isEmpty) return;
+    setState(() {
+      _isGenerating = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final result = await _geminiService.generateFollowUp(
+        apiKey: _apiKey,
+        student: widget.student,
+        language: _selectedLanguage,
+        tone: _selectedTone,
+        customInstructions: _customInstructionController.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _messageController.text = result;
+        _isGenerating = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = e.toString();
+        _isGenerating = false;
+      });
+    }
+  }
+
+  Future<void> _pasteFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim() ?? '';
+    if (text.isNotEmpty) {
+      _apiKeyController.text = text;
+    }
+  }
+
+  Future<void> _openGoogleAiStudio() async {
+    final uri = Uri.parse('https://aistudio.google.com/app/apikey');
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _copyMessage() async {
+    final text = _messageController.text.trim();
+    if (text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Message copied to clipboard!'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        22,
+        12,
+        22,
+        MediaQuery.viewInsetsOf(context).bottom + 24,
+      ),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  height: 4,
+                  width: 40,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF526170)
+                        : const Color(0xFFDDE3E9),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.auto_awesome_rounded,
+                      color: Color(0xFF8B5CF6),
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Generate AI Message',
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          'Personalized for ${widget.student.name}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // If API Key is missing, show Setup Card
+              if (_apiKey.isEmpty) ...[
+                Card(
+                  color: theme.colorScheme.surfaceContainerLow,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.key_rounded,
+                              color: Color(0xFF8B5CF6),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Gemini API Key Required',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'To generate custom WhatsApp messages, paste your free Google Gemini API key below. You can get one in seconds from Google AI Studio without a credit card.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            height: 1.4,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: _openGoogleAiStudio,
+                          icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                          label: const Text('Get Free Key (Google AI Studio)'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF8B5CF6),
+                            side: const BorderSide(color: Color(0xFF8B5CF6)),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _apiKeyController,
+                          obscureText: _obscureApiKey,
+                          decoration: InputDecoration(
+                            labelText: 'Paste Gemini API Key',
+                            border: const OutlineInputBorder(),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscureApiKey
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                              ),
+                              onPressed: () => setState(
+                                () => _obscureApiKey = !_obscureApiKey,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            TextButton.icon(
+                              onPressed: _pasteFromClipboard,
+                              icon: const Icon(Icons.paste_rounded, size: 16),
+                              label: const Text('Paste'),
+                            ),
+                            const Spacer(),
+                            FilledButton(
+                              onPressed: _saveApiKey,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF8B5CF6),
+                              ),
+                              child: const Text('Save & Generate'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ] else ...[
+                // Student Context Pill Card
+                Card(
+                  color: theme.colorScheme.surfaceContainerLow,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '${widget.student.name} • ${widget.student.examType} ${widget.student.examYear}'.trim(),
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.primaryContainer,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                widget.student.callStatus,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: theme.colorScheme.onPrimaryContainer,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (widget.student.comment.trim().isNotEmpty ||
+                            widget.student.commentHistory.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            '💬 "${widget.student.comment.trim().isNotEmpty ? widget.student.comment.trim() : widget.student.commentHistory.last.trim()}"',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontStyle: FontStyle.italic,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Language selector
+                Text(
+                  'Language:',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  children: _languages.map((lang) {
+                    final selected = _selectedLanguage == lang;
+                    final displayLabel = lang == 'Sinhala' ? 'සිංහල' : lang;
+                    return ChoiceChip(
+                      label: Text(displayLabel),
+                      selected: selected,
+                      selectedColor: const Color(0xFF8B5CF6).withValues(alpha: 0.2),
+                      labelStyle: TextStyle(
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                        color: selected
+                            ? const Color(0xFF8B5CF6)
+                            : theme.colorScheme.onSurface,
+                      ),
+                      onSelected: (val) {
+                        if (val) {
+                          setState(() => _selectedLanguage = lang);
+                          _generateMessage();
+                        }
+                      },
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 10),
+
+                // Goal / Tone selector
+                Text(
+                  'Tone / Purpose:',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: _tones.map((tone) {
+                    final selected = _selectedTone == tone;
+                    return ChoiceChip(
+                      label: Text(tone),
+                      selected: selected,
+                      selectedColor: const Color(0xFF8B5CF6).withValues(alpha: 0.2),
+                      labelStyle: TextStyle(
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                        color: selected
+                            ? const Color(0xFF8B5CF6)
+                            : theme.colorScheme.onSurface,
+                      ),
+                      onSelected: (val) {
+                        if (val) {
+                          setState(() => _selectedTone = tone);
+                          _generateMessage();
+                        }
+                      },
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 10),
+
+                // Extra Custom Guidance
+                TextField(
+                  controller: _customInstructionController,
+                  decoration: const InputDecoration(
+                    labelText: 'Extra Note / Instruction (Optional)',
+                    hintText: 'e.g. mention class on Sunday 9 AM',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onSubmitted: (_) => _generateMessage(),
+                ),
+                const SizedBox(height: 12),
+
+                // Error Message if any
+                if (_errorMessage != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.errorContainer.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      _errorMessage!,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.error,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+
+                // Loading State or Editable Message
+                if (_isGenerating) ...[
+                  const SizedBox(height: 18),
+                  const Center(
+                    child: Column(
+                      children: [
+                        CircularProgressIndicator(
+                          color: Color(0xFF8B5CF6),
+                        ),
+                        SizedBox(height: 12),
+                        Text(
+                          'Gemini is crafting a personalized message...',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                ] else if (_messageController.text.trim().isNotEmpty) ...[
+                  Text(
+                    'Generated Message (Editable):',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  TextFormField(
+                    controller: _messageController,
+                    maxLines: 8,
+                    minLines: 4,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _isGenerating ? null : _generateMessage,
+                        icon: const Icon(Icons.refresh_rounded, size: 18),
+                        label: const Text('Regenerate'),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton.outlined(
+                        onPressed: _copyMessage,
+                        icon: const Icon(Icons.copy_rounded, size: 18),
+                        tooltip: 'Copy text',
+                      ),
+                      const Spacer(),
+                      ElevatedButton.icon(
+                        onPressed: () =>
+                            Navigator.pop(context, _messageController.text),
+                        icon: const FaIcon(FontAwesomeIcons.whatsapp, size: 18),
+                        label: const Text('Send on WhatsApp'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF25D366),
+                          foregroundColor: Colors.white,
+                          elevation: 2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  FilledButton.icon(
+                    onPressed: _isGenerating ? null : _generateMessage,
+                    icon: const Icon(Icons.auto_awesome_rounded),
+                    label: const Text('Generate Message'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF8B5CF6),
+                    ),
+                  ),
+                ],
+              ],
+            ],
+          ),
         ),
       ),
     );
