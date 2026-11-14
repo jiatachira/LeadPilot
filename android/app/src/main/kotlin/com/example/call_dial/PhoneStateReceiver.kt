@@ -1,10 +1,8 @@
 package com.example.call_dial
 
-import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.PowerManager
 import android.telephony.TelephonyManager
 import android.util.Log
 
@@ -54,20 +52,17 @@ class PhoneStateReceiver : BroadcastReceiver() {
 
                     val student = CallerIdCacheManager.lookupStudent(appContext, incomingNumber)
                     if (student != null) {
-                        Log.d(TAG, "Matched student: ${student.name} (${student.phone})")
+                        Log.d(TAG, "Matched student: ${student.name} (${student.phone}). Triggering lock screen and overlay displays.")
                         lastShownNumber = incomingNumber
 
-                        val keyguardManager = appContext.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-                        val powerManager = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
-                        val isLocked = keyguardManager?.isKeyguardLocked == true || powerManager?.isInteractive == false
+                        // 1. Post Full-Screen Intent Notification (wakes up screen, displays on lock screen via Android NotificationManager)
+                        CallerIdNotificationHelper.show(appContext, student)
 
-                        if (isLocked) {
-                            Log.d(TAG, "Screen is locked/off. Starting CallerIdActivity for lockscreen.")
-                            CallerIdActivity.start(appContext, student)
-                        } else {
-                            Log.d(TAG, "Screen is active and unlocked. Showing WindowManager overlay.")
-                            CallerIdOverlayManager.show(appContext, student)
-                        }
+                        // 2. Start transparent Activity with showWhenLocked
+                        CallerIdActivity.start(appContext, student)
+
+                        // 3. Show WindowManager floating overlay
+                        CallerIdOverlayManager.show(appContext, student)
                     } else {
                         Log.d(TAG, "No student lead matched for number: $incomingNumber")
                     }
@@ -76,8 +71,9 @@ class PhoneStateReceiver : BroadcastReceiver() {
                 }
             }
             TelephonyManager.EXTRA_STATE_IDLE -> {
-                Log.d(TAG, "EXTRA_STATE_IDLE: Phone call ended or idle. Dismissing all overlays/activities.")
+                Log.d(TAG, "EXTRA_STATE_IDLE: Phone call ended or idle. Dismissing all overlays/notifications.")
                 lastShownNumber = null
+                CallerIdNotificationHelper.cancel(appContext)
                 CallerIdActivity.dismissCurrent()
                 CallerIdOverlayManager.dismiss(appContext)
             }
