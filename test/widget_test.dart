@@ -71,12 +71,14 @@ Widget testApp({
   ReminderScheduler? reminderScheduler,
   MemoryAppSettingsStore? settingsStore,
   DeviceContactsService? deviceContactsService,
+  bool showSplash = false,
 }) {
   return StudentCallApp(
     httpClient: httpClient,
     reminderScheduler: reminderScheduler ?? FakeReminderScheduler(),
     settingsStore: settingsStore ?? MemoryAppSettingsStore(),
     deviceContactsService: deviceContactsService,
+    showSplash: showSplash,
   );
 }
 
@@ -2247,7 +2249,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.12.7'), findsOneWidget);
+    expect(find.text('LeadPilot v1.13.0'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -2697,5 +2699,31 @@ void main() {
           t.message == 'Hello {name}, your tuition class starts next Monday!'),
       isTrue,
     );
+  });
+
+  testWidgets(
+      'AppSplashScreen displays LeadPilot emblem, animates, and allows instant tap to skip',
+      (tester) async {
+    var finished = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AppSplashScreen(
+          duration: const Duration(milliseconds: 300),
+          onFinished: () => finished = true,
+        ),
+      ),
+    );
+
+    // Initial frame
+    await tester.pump();
+    expect(find.text('LeadPilot'), findsOneWidget);
+    expect(find.text('STUDENT LEADS • SMART DIALER'), findsOneWidget);
+    expect(find.byType(LeadPilotAppIcon), findsOneWidget);
+
+    // Tap to skip immediately
+    await tester.tap(find.byType(AppSplashScreen));
+    await tester.pump();
+    expect(finished, isTrue);
   });
 }
