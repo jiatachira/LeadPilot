@@ -1,8 +1,11 @@
 package com.example.call_dial
 
+import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.PowerManager
+import android.provider.Settings
 import android.telephony.TelephonyManager
 import android.util.Log
 
@@ -52,17 +55,39 @@ class PhoneStateReceiver : BroadcastReceiver() {
 
                     val student = CallerIdCacheManager.lookupStudent(appContext, incomingNumber)
                     if (student != null) {
-                        Log.d(TAG, "Matched student: ${student.name} (${student.phone}). Triggering lock screen and overlay displays.")
+                        Log.d(TAG, "Matched student: ${student.name} (${student.phone}). Checking lock state to show single popup.")
                         lastShownNumber = incomingNumber
 
-                        // 1. Post Full-Screen Intent Notification (wakes up screen, displays on lock screen via Android NotificationManager)
-                        CallerIdNotificationHelper.show(appContext, student)
+                        val keyguardManager = appContext.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+                        val powerManager = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                        val isScreenOn = powerManager?.isInteractive ?: true
+                        val isLocked = (keyguardManager?.isKeyguardLocked == true) || !isScreenOn
 
-                        // 2. Start transparent Activity with showWhenLocked
-                        CallerIdActivity.start(appContext, student)
+                        if (isLocked) {
+                            Log.d(TAG, "Device is locked/screen-off (isLocked=$isLocked). Launching single lock screen Caller ID.")
+                            // Ensure WindowManager overlay is NOT displayed
+                            CallerIdOverlayManager.dismiss(appContext)
 
-                        // 3. Show WindowManager floating overlay
-                        CallerIdOverlayManager.show(appContext, student)
+                            // 1. Post Full-Screen Intent Notification (wakes up screen, launches CallerIdActivity via fullScreenIntent)
+                            CallerIdNotificationHelper.show(appContext, student)
+
+                            // 2. Also attempt direct transparent Activity start
+                            CallerIdActivity.start(appContext, student)
+                        } else {
+                            Log.d(TAG, "Device is unlocked (isLocked=$isLocked). Displaying single floating overlay.")
+                            // Dismiss lock screen activity
+                            CallerIdActivity.dismissCurrent()
+
+                            // Check overlay permission
+                            if (Settings.canDrawOverlays(appContext)) {
+                                // Cancel notification banner so only the floating overlay is visible
+                                CallerIdNotificationHelper.cancel(appContext)
+                                CallerIdOverlayManager.show(appContext, student)
+                            } else {
+                                // Fallback to notification banner if overlay permission not granted
+                                CallerIdNotificationHelper.show(appContext, student)
+                            }
+                        }
                     } else {
                         Log.d(TAG, "No student lead matched for number: $incomingNumber")
                     }

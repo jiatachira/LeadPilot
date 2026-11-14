@@ -116,8 +116,6 @@ object CallerIdOverlayManager {
                     WindowManager.LayoutParams.WRAP_CONTENT,
                     layoutFlag,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
                         WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
                     PixelFormat.TRANSLUCENT
                 )

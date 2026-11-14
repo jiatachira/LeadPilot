@@ -2244,7 +2244,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.11.3'), findsOneWidget);
+    expect(find.text('LeadPilot v1.11.4'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -2252,5 +2252,35 @@ void main() {
 
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(CallerIdService.channel, null);
+  });
+
+  testWidgets(
+      'PinScreen auto-biometric dismissal does not decrement attempts or show error',
+      (tester) async {
+    var biometricCalled = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PinScreen(
+            isFirstTime: false,
+            storedPin: '2580',
+            biometricEnabled: true,
+            onBiometricAuth: () async {
+              biometricCalled = true;
+              return false; // User dismissed or canceled
+            },
+            onPinCreated: (_) async {},
+            onAuthenticated: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(biometricCalled, isTrue);
+    expect(find.textContaining('tries left'), findsNothing);
+    expect(find.textContaining('not recognised'), findsNothing);
+    expect(find.text('Welcome Back'), findsOneWidget);
+    expect(find.text('Use fingerprint or enter your PIN.'), findsOneWidget);
   });
 }

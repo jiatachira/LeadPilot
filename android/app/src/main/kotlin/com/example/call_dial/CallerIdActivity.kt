@@ -58,6 +58,9 @@ class CallerIdActivity : Activity() {
         setupLockScreenFlags()
         setContentView(R.layout.caller_id_activity)
 
+        // Cancel the notification banner so there is NO duplicate heads-up popup over the activity
+        CallerIdNotificationHelper.cancel(this)
+
         val name = intent.getStringExtra("name") ?: "Student Lead"
         val phone = intent.getStringExtra("phone") ?: ""
         val status = intent.getStringExtra("status") ?: "Pending"

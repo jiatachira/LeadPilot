@@ -1767,10 +1767,6 @@ class _StudentCallAppState extends State<StudentCallApp> {
         _biometricEnabled = biometricEnabled;
         _isLoadingSettings = false;
       });
-      // Auto-trigger biometric on startup if enabled and PIN is set.
-      if (biometricEnabled && savedPin != null) {
-        unawaited(_tryBiometricLogin());
-      }
     } on Exception catch (error) {
       if (!mounted) return;
       setState(() {
@@ -1780,7 +1776,11 @@ class _StudentCallAppState extends State<StudentCallApp> {
     }
   }
 
+  bool _isBiometricRunning = false;
+
   Future<bool> _tryBiometricLogin() async {
+    if (_isBiometricRunning) return false;
+    _isBiometricRunning = true;
     try {
       final canCheck = await _localAuth.canCheckBiometrics;
       final isDeviceSupported = await _localAuth.isDeviceSupported();
@@ -1807,6 +1807,8 @@ class _StudentCallAppState extends State<StudentCallApp> {
     } catch (error) {
       debugPrint('Unexpected biometric error: $error');
       return false;
+    } finally {
+      _isBiometricRunning = false;
     }
   }
 
@@ -1946,21 +1948,26 @@ class _PinScreenState extends State<PinScreen> {
     // Auto-trigger biometric prompt when screen appears (if enabled).
     if (widget.biometricEnabled && !widget.isFirstTime) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _doBiometricAuth();
+        if (mounted) _doBiometricAuth(isAutoTrigger: true);
       });
     }
   }
 
-  Future<void> _doBiometricAuth() async {
+  Future<void> _doBiometricAuth({bool isAutoTrigger = false}) async {
     if (_biometricRunning || widget.onBiometricAuth == null) return;
     setState(() => _biometricRunning = true);
     try {
       final success = await widget.onBiometricAuth!();
       if (!mounted) return;
+      setState(() => _biometricRunning = false);
       if (!success) {
+        if (isAutoTrigger) {
+          // User simply dismissed the prompt to enter PIN or prompt closed cleanly.
+          // Do NOT count as a failed attempt or show error text on initial startup.
+          return;
+        }
         setState(() {
           _biometricFailCount++;
-          _biometricRunning = false;
           if (_biometricFailCount >= _maxBiometricAttempts) {
             _message = 'Fingerprint failed 3 times. Enter your PIN.';
             _hasError = true;
@@ -1976,20 +1983,21 @@ class _PinScreenState extends State<PinScreen> {
     } catch (_) {
       if (mounted) {
         setState(() {
-          _biometricFailCount++;
           _biometricRunning = false;
-          if (_biometricFailCount >= _maxBiometricAttempts) {
-            _message = 'Fingerprint failed 3 times. Enter your PIN.';
-            _hasError = true;
-          } else {
-            _message = 'Could not read fingerprint. Try again or enter PIN.';
-            _hasError = true;
+          if (!isAutoTrigger) {
+            _biometricFailCount++;
+            if (_biometricFailCount >= _maxBiometricAttempts) {
+              _message = 'Fingerprint failed 3 times. Enter your PIN.';
+              _hasError = true;
+            } else {
+              _message = 'Could not read fingerprint. Try again or enter PIN.';
+              _hasError = true;
+            }
           }
         });
       }
       return;
     }
-    if (mounted) setState(() => _biometricRunning = false);
   }
 
   String get _heading {
@@ -2183,7 +2191,7 @@ class _PinScreenState extends State<PinScreen> {
                                   TextButton.icon(
                                     onPressed: _biometricRunning
                                         ? null
-                                        : _doBiometricAuth,
+                                        : () => _doBiometricAuth(isAutoTrigger: false),
                                     icon: _biometricRunning
                                         ? const SizedBox(
                                             width: 18,
@@ -6669,7 +6677,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.11.3',
+                    'LeadPilot v1.11.4',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,
