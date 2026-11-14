@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:http/http.dart' as http;
+import 'package:local_auth/local_auth.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:timezone/data/latest.dart' as timezone_data;
 import 'package:timezone/timezone.dart' as timezone;
@@ -102,7 +103,7 @@ String _defaultSheetName(String url) {
   return 'Google Sheet $shortId';
 }
 
-Uri whatsAppChatUri(String phoneNumber) {
+Uri whatsAppChatUri(String phoneNumber, {String? text}) {
   final trimmed = phoneNumber.trim();
   var digits = trimmed.replaceAll(RegExp(r'\D'), '');
   if (trimmed.startsWith('00')) {
@@ -112,7 +113,11 @@ Uri whatsAppChatUri(String phoneNumber) {
   } else if (digits.startsWith('0')) {
     digits = '$_defaultWhatsAppCountryCode${digits.substring(1)}';
   }
-  return Uri.https('wa.me', '/$digits');
+  return Uri.https(
+    'wa.me',
+    '/$digits',
+    (text != null && text.trim().isNotEmpty) ? {'text': text.trim()} : null,
+  );
 }
 
 String normalizeContactPhone(String phoneNumber) {
@@ -408,6 +413,59 @@ class LinkedSheet {
   }
 }
 
+class WhatsAppTemplate {
+  const WhatsAppTemplate({
+    required this.id,
+    required this.name,
+    required this.message,
+  });
+
+  final String id;
+  final String name;
+  final String message;
+
+  WhatsAppTemplate copyWith({
+    String? id,
+    String? name,
+    String? message,
+  }) {
+    return WhatsAppTemplate(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      message: message ?? this.message,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'message': message,
+  };
+
+  factory WhatsAppTemplate.fromJson(Map<String, dynamic> json) {
+    return WhatsAppTemplate(
+      id: (json['id'] as String?) ??
+          DateTime.now().millisecondsSinceEpoch.toString(),
+      name: (json['name'] as String?) ?? '',
+      message: (json['message'] as String?) ?? '',
+    );
+  }
+
+  static const List<WhatsAppTemplate> defaultTemplates = [
+    WhatsAppTemplate(
+      id: 'default_1',
+      name: 'General Follow-up',
+      message: 'Hello {name}, following up on our recent conversation.',
+    ),
+    WhatsAppTemplate(
+      id: 'default_2',
+      name: 'Course Details',
+      message:
+          'Hello {name}, here are the details for the course you inquired about.',
+    ),
+  ];
+}
+
 class SaveContactsResult {
   const SaveContactsResult({
     this.saved = 0,
@@ -505,6 +563,22 @@ abstract interface class AppSettingsStore {
   Future<ThemeMode> readThemeMode();
 
   Future<void> saveThemeMode(ThemeMode mode);
+
+  Future<bool> readBiometricEnabled();
+
+  Future<void> saveBiometricEnabled(bool enabled);
+
+  Future<List<QueuedSheetAction>> readOfflineQueue();
+
+  Future<void> saveOfflineQueue(List<QueuedSheetAction> queue);
+
+  Future<List<Student>> readCachedStudents();
+
+  Future<void> saveCachedStudents(List<Student> students);
+
+  Future<List<WhatsAppTemplate>> readWhatsAppTemplates();
+
+  Future<void> saveWhatsAppTemplates(List<WhatsAppTemplate> templates);
 }
 
 class SecureAppSettingsStore implements AppSettingsStore {
@@ -516,6 +590,10 @@ class SecureAppSettingsStore implements AppSettingsStore {
   static const _sheetNameKey = 'student_call_sheet_name';
   static const _linkedSheetsKey = 'student_call_linked_sheets';
   static const _themeModeKey = 'student_call_theme_mode';
+  static const _biometricEnabledKey = 'student_call_biometric_enabled';
+  static const _offlineQueueKey = 'student_call_offline_queue';
+  static const _cachedStudentsKey = 'student_call_cached_students';
+  static const _whatsAppTemplatesKey = 'student_call_whatsapp_templates';
   final FlutterSecureStorage _storage;
 
   @override
@@ -556,6 +634,87 @@ class SecureAppSettingsStore implements AppSettingsStore {
       _storage.write(key: _themeModeKey, value: mode.name);
 
   @override
+  Future<bool> readBiometricEnabled() async {
+    final val = await _storage.read(key: _biometricEnabledKey);
+    return val == 'true';
+  }
+
+  @override
+  Future<void> saveBiometricEnabled(bool enabled) =>
+      _storage.write(key: _biometricEnabledKey, value: enabled.toString());
+
+  @override
+  Future<List<QueuedSheetAction>> readOfflineQueue() async {
+    final saved = await _storage.read(key: _offlineQueueKey);
+    if (saved == null || saved.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(saved);
+      if (decoded is! List) return const [];
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map((item) => QueuedSheetAction.fromJson(item))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  @override
+  Future<void> saveOfflineQueue(List<QueuedSheetAction> queue) =>
+      _storage.write(
+        key: _offlineQueueKey,
+        value: jsonEncode(queue.map((item) => item.toJson()).toList()),
+      );
+
+  @override
+  Future<List<Student>> readCachedStudents() async {
+    final saved = await _storage.read(key: _cachedStudentsKey);
+    if (saved == null || saved.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(saved);
+      if (decoded is! List) return const [];
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map((item) => Student.fromJson(item))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  @override
+  Future<void> saveCachedStudents(List<Student> students) =>
+      _storage.write(
+        key: _cachedStudentsKey,
+        value: jsonEncode(students.map((s) => s.toJson()).toList()),
+      );
+
+  @override
+  Future<List<WhatsAppTemplate>> readWhatsAppTemplates() async {
+    final saved = await _storage.read(key: _whatsAppTemplatesKey);
+    if (saved == null) {
+      return WhatsAppTemplate.defaultTemplates;
+    }
+    try {
+      final decoded = jsonDecode(saved);
+      if (decoded is! List) return WhatsAppTemplate.defaultTemplates;
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map((item) => WhatsAppTemplate.fromJson(item))
+          .toList();
+    } catch (_) {
+      return WhatsAppTemplate.defaultTemplates;
+    }
+  }
+
+  @override
+  Future<void> saveWhatsAppTemplates(List<WhatsAppTemplate> templates) =>
+      _storage.write(
+        key: _whatsAppTemplatesKey,
+        value: jsonEncode(templates.map((t) => t.toJson()).toList()),
+      );
+
+  @override
   Future<void> saveSheetConfig(String url, {String name = ''}) async {
     final normalizedUrl = url.trim();
     final linkedSheets = await readLinkedSheets();
@@ -590,6 +749,7 @@ class MemoryAppSettingsStore implements AppSettingsStore {
   String sheetConfig = '';
   String sheetName = '';
   ThemeMode themeMode = ThemeMode.system;
+  bool biometricEnabled = false;
   final List<LinkedSheet> linkedSheets = [];
 
   @override
@@ -627,6 +787,48 @@ class MemoryAppSettingsStore implements AppSettingsStore {
   Future<void> saveThemeMode(ThemeMode mode) async {
     themeMode = mode;
   }
+
+  @override
+  Future<bool> readBiometricEnabled() async => biometricEnabled;
+
+  @override
+  Future<void> saveBiometricEnabled(bool enabled) async {
+    biometricEnabled = enabled;
+  }
+
+  final List<QueuedSheetAction> offlineQueue = [];
+  final List<Student> cachedStudents = [];
+  List<WhatsAppTemplate>? whatsAppTemplates;
+
+  @override
+  Future<List<QueuedSheetAction>> readOfflineQueue() async =>
+      List.of(offlineQueue);
+
+  @override
+  Future<void> saveOfflineQueue(List<QueuedSheetAction> queue) async {
+    offlineQueue
+      ..clear()
+      ..addAll(queue);
+  }
+
+  @override
+  Future<List<Student>> readCachedStudents() async => List.of(cachedStudents);
+
+  @override
+  Future<void> saveCachedStudents(List<Student> students) async {
+    cachedStudents
+      ..clear()
+      ..addAll(students);
+  }
+
+  @override
+  Future<List<WhatsAppTemplate>> readWhatsAppTemplates() async =>
+      List.of(whatsAppTemplates ?? WhatsAppTemplate.defaultTemplates);
+
+  @override
+  Future<void> saveWhatsAppTemplates(List<WhatsAppTemplate> templates) async {
+    whatsAppTemplates = List.of(templates);
+  }
 }
 
 ThemeMode _themeModeFromName(String? value) => switch (value) {
@@ -643,6 +845,8 @@ abstract interface class ReminderScheduler {
   Future<void> scheduleStudentReminder(Student student, DateTime dateTime);
 
   Future<void> cancelStudentReminder(Student student);
+
+  Future<bool> isStudentReminderScheduled(Student student, [DateTime? dateTime]);
 }
 
 class LocalReminderService implements ReminderScheduler {
@@ -698,20 +902,28 @@ class LocalReminderService implements ReminderScheduler {
 
   @override
   Future<bool> canScheduleExactAlarms() async {
-    final android = _plugin
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >();
-    return await android?.canScheduleExactNotifications() ?? true;
+    try {
+      final android = _plugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
+      return await android?.canScheduleExactNotifications() ?? true;
+    } catch (_) {
+      return true;
+    }
   }
 
   @override
   Future<bool> requestExactAlarmsPermission() async {
-    final android = _plugin
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >();
-    return await android?.requestExactAlarmsPermission() ?? true;
+    try {
+      final android = _plugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
+      return await android?.requestExactAlarmsPermission() ?? true;
+    } catch (_) {
+      return true;
+    }
   }
 
   @override
@@ -793,6 +1005,23 @@ class LocalReminderService implements ReminderScheduler {
     await _plugin.cancel(id: notificationId);
     await _cancelLegacyNotificationIfPresent(student, notificationId);
     await _removeScheduledReminder(student);
+  }
+
+  @override
+  Future<bool> isStudentReminderScheduled(
+    Student student, [
+    DateTime? dateTime,
+  ]) async {
+    final phoneKey = normalizeContactPhone(student.phone);
+    if (phoneKey.isEmpty) return false;
+    final reminders = await _readScheduledReminders();
+    final reminder = reminders[phoneKey];
+    if (reminder == null) return false;
+    if (dateTime != null) {
+      return reminder.dateTime.isAtSameMomentAs(dateTime) &&
+          reminder.dateTime.isAfter(DateTime.now());
+    }
+    return reminder.dateTime.isAfter(DateTime.now());
   }
 
   Future<int> _notificationId(Student student) async {
@@ -1162,6 +1391,7 @@ class _StudentCallAppState extends State<StudentCallApp> {
   bool _isFirstTime = true;
   bool _isAuthenticated = false;
   bool _isLoadingSettings = true;
+  bool _biometricEnabled = false;
   Object? _settingsLoadError;
   late final AppSettingsStore _settingsStore =
       widget.settingsStore ?? SecureAppSettingsStore();
@@ -1170,6 +1400,7 @@ class _StudentCallAppState extends State<StudentCallApp> {
   );
   late final ReminderScheduler _reminderScheduler =
       widget.reminderScheduler ?? LocalReminderService();
+  final _localAuth = LocalAuthentication();
 
   @override
   void initState() {
@@ -1285,11 +1516,16 @@ class _StudentCallAppState extends State<StudentCallApp> {
               onLogout: _lockApp,
               onSaveSheetConfig: _saveSheetConfig,
               onThemeModeChanged: _saveThemeMode,
+              biometricEnabled: _biometricEnabled,
+              onBiometricChanged: _saveBiometricEnabled,
+              settingsStore: _settingsStore,
             )
           : PinScreen(
               key: ValueKey(_isFirstTime),
               isFirstTime: _isFirstTime,
               storedPin: _pin,
+              biometricEnabled: _biometricEnabled && !_isFirstTime,
+              onBiometricAuth: _tryBiometricLogin,
               onPinCreated: _savePin,
               onAuthenticated: _unlockApp,
             ),
@@ -1308,12 +1544,14 @@ class _StudentCallAppState extends State<StudentCallApp> {
         _settingsStore.readSheetName(),
         _settingsStore.readLinkedSheets(),
         _settingsStore.readThemeMode(),
+        _settingsStore.readBiometricEnabled(),
       ]);
       if (!mounted) return;
       final savedPin = values[0] as String?;
       final savedSheetConfig = values[1] as String;
       final linkedSheets = values[3] as List<LinkedSheet>;
       final savedSheetName = values[2] as String;
+      final biometricEnabled = values[5] as bool;
       setState(() {
         _pin = savedPin;
         _isFirstTime = savedPin == null;
@@ -1327,14 +1565,49 @@ class _StudentCallAppState extends State<StudentCallApp> {
                   '';
         _linkedSheets = linkedSheets;
         _themeMode = values[4] as ThemeMode;
+        _biometricEnabled = biometricEnabled;
         _isLoadingSettings = false;
       });
+      // Auto-trigger biometric on startup if enabled and PIN is set.
+      if (biometricEnabled && savedPin != null) {
+        unawaited(_tryBiometricLogin());
+      }
     } on Exception catch (error) {
       if (!mounted) return;
       setState(() {
         _settingsLoadError = error;
         _isLoadingSettings = false;
       });
+    }
+  }
+
+  Future<bool> _tryBiometricLogin() async {
+    try {
+      final canCheck = await _localAuth.canCheckBiometrics;
+      final isDeviceSupported = await _localAuth.isDeviceSupported();
+      if (!canCheck && !isDeviceSupported) {
+        debugPrint('Device does not support biometric check');
+        return false;
+      }
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'Scan your fingerprint to log in to LeadPilot',
+        options: const AuthenticationOptions(
+          biometricOnly: false,
+          stickyAuth: true,
+          useErrorDialogs: true,
+        ),
+      );
+      if (authenticated && mounted) {
+        _unlockApp();
+        return true;
+      }
+      return false;
+    } on PlatformException catch (error) {
+      debugPrint('Biometric authentication failed: $error');
+      return false;
+    } catch (error) {
+      debugPrint('Unexpected biometric error: $error');
+      return false;
     }
   }
 
@@ -1354,6 +1627,12 @@ class _StudentCallAppState extends State<StudentCallApp> {
 
   void _lockApp() {
     setState(() => _isAuthenticated = false);
+  }
+
+  Future<void> _saveBiometricEnabled(bool enabled) async {
+    await _settingsStore.saveBiometricEnabled(enabled);
+    if (!mounted) return;
+    setState(() => _biometricEnabled = enabled);
   }
 
   Future<void> _saveSheetConfig(LinkedSheet config) async {
@@ -1428,6 +1707,8 @@ class PinScreen extends StatefulWidget {
     required this.storedPin,
     required this.onPinCreated,
     required this.onAuthenticated,
+    this.biometricEnabled = false,
+    this.onBiometricAuth,
     super.key,
   });
 
@@ -1435,6 +1716,8 @@ class PinScreen extends StatefulWidget {
   final String? storedPin;
   final Future<void> Function(String) onPinCreated;
   final VoidCallback onAuthenticated;
+  final bool biometricEnabled;
+  final Future<bool> Function()? onBiometricAuth;
 
   @override
   State<PinScreen> createState() => _PinScreenState();
@@ -1447,14 +1730,84 @@ class _PinScreenState extends State<PinScreen> {
   bool _hasError = false;
   bool _showSuccess = false;
   bool _isSavingPin = false;
+  // Fingerprint: how many times biometric failed — after 3 show PIN only.
+  int _biometricFailCount = 0;
+  bool _biometricRunning = false;
+
+  static const _maxBiometricAttempts = 3;
+
+  bool get _showBiometricButton =>
+      widget.biometricEnabled &&
+      !widget.isFirstTime &&
+      _biometricFailCount < _maxBiometricAttempts;
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-trigger biometric prompt when screen appears (if enabled).
+    if (widget.biometricEnabled && !widget.isFirstTime) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _doBiometricAuth();
+      });
+    }
+  }
+
+  Future<void> _doBiometricAuth() async {
+    if (_biometricRunning || widget.onBiometricAuth == null) return;
+    setState(() => _biometricRunning = true);
+    try {
+      final success = await widget.onBiometricAuth!();
+      if (!mounted) return;
+      if (!success) {
+        setState(() {
+          _biometricFailCount++;
+          _biometricRunning = false;
+          if (_biometricFailCount >= _maxBiometricAttempts) {
+            _message = 'Fingerprint failed 3 times. Enter your PIN.';
+            _hasError = true;
+          } else {
+            _message =
+                'Fingerprint not recognised. '
+                '${_maxBiometricAttempts - _biometricFailCount} tries left.';
+            _hasError = true;
+          }
+        });
+        return;
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _biometricFailCount++;
+          _biometricRunning = false;
+          if (_biometricFailCount >= _maxBiometricAttempts) {
+            _message = 'Fingerprint failed 3 times. Enter your PIN.';
+            _hasError = true;
+          } else {
+            _message = 'Could not read fingerprint. Try again or enter PIN.';
+            _hasError = true;
+          }
+        });
+      }
+      return;
+    }
+    if (mounted) setState(() => _biometricRunning = false);
+  }
 
   String get _heading {
-    if (!widget.isFirstTime) return 'Welcome Back - Enter PIN';
+    if (!widget.isFirstTime) {
+      return _showBiometricButton
+          ? 'Welcome Back'
+          : 'Welcome Back - Enter PIN';
+    }
     return _setupPin == null ? 'Create Your 4-Digit PIN' : 'Confirm Your PIN';
   }
 
   String get _subtitle {
-    if (!widget.isFirstTime) return 'Enter your PIN to access your directory.';
+    if (!widget.isFirstTime) {
+      return _showBiometricButton
+          ? 'Use fingerprint or enter your PIN.'
+          : 'Enter your PIN to access your directory.';
+    }
     return _setupPin == null
         ? 'Set up a secure PIN to protect your student directory.'
         : 'Enter your new PIN once more to confirm.';
@@ -1624,6 +1977,39 @@ class _PinScreenState extends State<PinScreen> {
                                   onClear: _clearPin,
                                   onBackspace: _deleteDigit,
                                 ),
+                                // 🔑 Fingerprint button — shown when biometric
+                                // is enabled and hasn't failed 3 times yet.
+                                if (_showBiometricButton) ...[
+                                  const SizedBox(height: 18),
+                                  TextButton.icon(
+                                    onPressed: _biometricRunning
+                                        ? null
+                                        : _doBiometricAuth,
+                                    icon: _biometricRunning
+                                        ? const SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: _green,
+                                            ),
+                                          )
+                                        : const Icon(
+                                            Icons.fingerprint_rounded,
+                                            size: 28,
+                                            color: _green,
+                                          ),
+                                    label: Text(
+                                      _biometricRunning
+                                          ? 'Scanning…'
+                                          : 'Use Fingerprint',
+                                      style: const TextStyle(
+                                        color: _green,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -1988,6 +2374,61 @@ class Student {
       .take(2)
       .map((part) => part[0].toUpperCase())
       .join();
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'contact': phone,
+    'source': source,
+    'addedDate': addedDate,
+    'location': location,
+    'examType': examType,
+    'examYear': examYear,
+    'olEnglish': olEnglish,
+    'olMaths': olMaths,
+    'whatsappNumber': whatsappNumber,
+    'whatsappSameAsContact': whatsappSameAsContact,
+    'callStatus': callStatus,
+    'nextCallDateTime': nextCallDateTime,
+    'comment': comment,
+    'commentHistory': commentHistory,
+    'attempts': attempts.map((attempt) => attempt.toJson()).toList(),
+    'note': note,
+  };
+}
+
+class QueuedSheetAction {
+  const QueuedSheetAction({
+    required this.id,
+    required this.action,
+    required this.student,
+    this.previousPhone,
+    required this.queuedAt,
+  });
+
+  final String id;
+  final String action;
+  final Student student;
+  final String? previousPhone;
+  final DateTime queuedAt;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'action': action,
+    'student': student.toJson(),
+    'previousPhone': previousPhone,
+    'queuedAt': queuedAt.toIso8601String(),
+  };
+
+  factory QueuedSheetAction.fromJson(Map<String, dynamic> json) {
+    return QueuedSheetAction(
+      id: json['id']?.toString() ?? '',
+      action: json['action']?.toString() ?? 'update',
+      student: Student.fromJson(json['student'] as Map<String, dynamic>),
+      previousPhone: json['previousPhone']?.toString(),
+      queuedAt: DateTime.tryParse(json['queuedAt']?.toString() ?? '') ??
+          DateTime.now(),
+    );
+  }
 }
 
 String _formatReminder(DateTime dateTime) {
@@ -2071,7 +2512,14 @@ class _LeadFilterSelection {
   final DateTime? dateTo;
 }
 
-enum _SettingsAction { sheetSync, filters, export, reports, saveContacts }
+enum _SettingsAction {
+  sheetSync,
+  filters,
+  export,
+  reports,
+  saveContacts,
+  whatsAppTemplates,
+}
 
 enum _StudentCardAction { edit, selectMultiple }
 
@@ -2257,6 +2705,9 @@ class HomeScreen extends StatefulWidget {
     required this.onLogout,
     required this.onSaveSheetConfig,
     required this.onThemeModeChanged,
+    required this.biometricEnabled,
+    required this.onBiometricChanged,
+    this.settingsStore,
     super.key,
   });
 
@@ -2270,6 +2721,9 @@ class HomeScreen extends StatefulWidget {
   final VoidCallback onLogout;
   final Future<void> Function(LinkedSheet) onSaveSheetConfig;
   final Future<void> Function(ThemeMode) onThemeModeChanged;
+  final bool biometricEnabled;
+  final Future<void> Function(bool) onBiometricChanged;
+  final AppSettingsStore? settingsStore;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -2279,6 +2733,12 @@ class _HomeScreenState extends State<HomeScreen> {
   final _searchController = TextEditingController();
   final List<Student> _students = [];
   final Set<String> _selectedStudentKeys = {};
+  late final AppSettingsStore _settingsStore =
+      widget.settingsStore ?? SecureAppSettingsStore();
+
+  List<QueuedSheetAction> _offlineQueue = [];
+  Timer? _offlineQueueRetryTimer;
+  bool _isFlushingQueue = false;
 
   String _query = '';
   _LeadFilter _leadFilter = _LeadFilter.all;
@@ -2295,6 +2755,36 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _loadInitialOfflineData();
+  }
+
+  Future<void> _loadInitialOfflineData() async {
+    try {
+      final cached = await _settingsStore.readCachedStudents();
+      final queue = await _settingsStore.readOfflineQueue();
+      if (!mounted) return;
+      setState(() {
+        _offlineQueue = queue;
+        if (cached.isNotEmpty) {
+          final merged = <String, Student>{
+            for (final s in cached) _studentKey(s): s,
+          };
+          for (final q in queue) {
+            merged[_studentKey(q.student)] = q.student;
+          }
+          _students
+            ..clear()
+            ..addAll(merged.values);
+        }
+        if (queue.isNotEmpty) {
+          _syncStatus = '${queue.length} offline change(s) queued';
+        }
+      });
+      if (queue.isNotEmpty) {
+        _startOfflineQueueTimer();
+      }
+    } catch (_) {}
+
     if (widget.sheetConfig.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _syncWithGoogleSheet();
@@ -2304,8 +2794,114 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _offlineQueueRetryTimer?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _startOfflineQueueTimer() {
+    _offlineQueueRetryTimer?.cancel();
+    _offlineQueueRetryTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) {
+        if (mounted && _offlineQueue.isNotEmpty && !_isSyncing) {
+          _flushOfflineQueue();
+        }
+      },
+    );
+  }
+
+  void _stopOfflineQueueTimer() {
+    _offlineQueueRetryTimer?.cancel();
+    _offlineQueueRetryTimer = null;
+  }
+
+  Future<void> _enqueueOfflineAction(QueuedSheetAction action) async {
+    final phoneKey = normalizeContactPhone(action.student.phone);
+    final previousPhoneKey = action.previousPhone != null
+        ? normalizeContactPhone(action.previousPhone!)
+        : null;
+
+    final existingIndex = _offlineQueue.indexWhere((item) {
+      final itemPhone = normalizeContactPhone(item.student.phone);
+      return itemPhone == phoneKey ||
+          (previousPhoneKey != null && itemPhone == previousPhoneKey);
+    });
+
+    if (existingIndex >= 0) {
+      final existing = _offlineQueue[existingIndex];
+      final preservedAction = existing.action == 'add' ? 'add' : action.action;
+      _offlineQueue[existingIndex] = QueuedSheetAction(
+        id: existing.id,
+        action: preservedAction,
+        student: action.student,
+        previousPhone: existing.previousPhone ?? action.previousPhone,
+        queuedAt: DateTime.now(),
+      );
+    } else {
+      _offlineQueue.add(action);
+    }
+
+    await _settingsStore.saveOfflineQueue(_offlineQueue);
+    await _settingsStore.saveCachedStudents(_students);
+    _startOfflineQueueTimer();
+
+    if (mounted) {
+      setState(() {
+        _syncStatus = '${_offlineQueue.length} offline change(s) queued';
+      });
+    }
+  }
+
+  Future<int> _flushOfflineQueue() async {
+    if (_isFlushingQueue ||
+        _offlineQueue.isEmpty ||
+        widget.sheetConfig.isEmpty) {
+      return 0;
+    }
+    _isFlushingQueue = true;
+    var syncedCount = 0;
+    final remainingQueue = List<QueuedSheetAction>.of(_offlineQueue);
+
+    for (final item in _offlineQueue) {
+      try {
+        if (item.action == 'add') {
+          await widget.sheetService.addStudentToSheet(
+            widget.sheetConfig,
+            item.student,
+          );
+        } else {
+          await widget.sheetService.updateStudentInSheet(
+            widget.sheetConfig,
+            item.student,
+            previousPhone: item.previousPhone,
+          );
+        }
+        remainingQueue.remove(item);
+        syncedCount++;
+      } catch (_) {
+        // Network still unavailable or rejected; break out so we retry later
+        break;
+      }
+    }
+
+    _offlineQueue = remainingQueue;
+    await _settingsStore.saveOfflineQueue(_offlineQueue);
+    _isFlushingQueue = false;
+
+    if (syncedCount > 0 && mounted) {
+      setState(() {
+        if (_offlineQueue.isEmpty) {
+          _stopOfflineQueueTimer();
+          _syncStatus =
+              'All offline changes synced! · ${_formattedSyncTime()}';
+        } else {
+          _syncStatus = '${_offlineQueue.length} offline change(s) queued';
+        }
+      });
+      await _settingsStore.saveCachedStudents(_students);
+    }
+    return syncedCount;
   }
 
   List<Student> get _filteredStudents {
@@ -2478,16 +3074,57 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       } on SheetApiException catch (error) {
         failures.add('${student.name}: ${error.message}');
+        await _enqueueOfflineAction(
+          QueuedSheetAction(
+            id: '${student.phone}_${DateTime.now().millisecondsSinceEpoch}',
+            action: 'add',
+            student: student,
+            queuedAt: DateTime.now(),
+          ),
+        );
       } on http.ClientException catch (error) {
         failures.add('${student.name}: network error (${error.message})');
+        await _enqueueOfflineAction(
+          QueuedSheetAction(
+            id: '${student.phone}_${DateTime.now().millisecondsSinceEpoch}',
+            action: 'add',
+            student: student,
+            queuedAt: DateTime.now(),
+          ),
+        );
       } on TimeoutException {
         failures.add('${student.name}: request timed out');
+        await _enqueueOfflineAction(
+          QueuedSheetAction(
+            id: '${student.phone}_${DateTime.now().millisecondsSinceEpoch}',
+            action: 'add',
+            student: student,
+            queuedAt: DateTime.now(),
+          ),
+        );
       } on FormatException catch (error) {
         failures.add('${student.name}: ${error.message}');
+        await _enqueueOfflineAction(
+          QueuedSheetAction(
+            id: '${student.phone}_${DateTime.now().millisecondsSinceEpoch}',
+            action: 'add',
+            student: student,
+            queuedAt: DateTime.now(),
+          ),
+        );
       } on Exception catch (error) {
         failures.add('${student.name}: $error');
+        await _enqueueOfflineAction(
+          QueuedSheetAction(
+            id: '${student.phone}_${DateTime.now().millisecondsSinceEpoch}',
+            action: 'add',
+            student: student,
+            queuedAt: DateTime.now(),
+          ),
+        );
       }
     }
+    await _settingsStore.saveCachedStudents(_students);
 
     if (!mounted) return;
     if (failures.isEmpty) {
@@ -2531,6 +3168,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (widget.sheetConfig.isEmpty) {
       _showMessage('Student details updated on this device.');
+      await _settingsStore.saveCachedStudents(_students);
       return;
     }
 
@@ -2545,21 +3183,42 @@ class _HomeScreenState extends State<HomeScreen> {
         previousPhone: student.phone,
       );
       if (!mounted) return;
+      _offlineQueue.removeWhere((item) =>
+          normalizeContactPhone(item.student.phone) ==
+          normalizeContactPhone(student.phone));
+      await _settingsStore.saveOfflineQueue(_offlineQueue);
+      await _settingsStore.saveCachedStudents(_students);
+
       setState(() {
         _isSyncing = false;
         _hasSynced = true;
         _lastSyncTime = _formattedSyncTime();
-        _syncStatus = 'Synced · $_lastSyncTime';
+        if (_offlineQueue.isEmpty) {
+          _syncStatus = 'Synced · $_lastSyncTime';
+        } else {
+          _syncStatus = '${_offlineQueue.length} offline change(s) queued';
+        }
       });
       _showMessage('Student details updated and synced to Google Sheets.');
     } on Exception catch (error) {
       if (!mounted) return;
+      await _enqueueOfflineAction(
+        QueuedSheetAction(
+          id: '${student.phone}_${DateTime.now().millisecondsSinceEpoch}',
+          action: 'update',
+          student: updatedStudent,
+          previousPhone: student.phone,
+          queuedAt: DateTime.now(),
+        ),
+      );
       setState(() {
         _isSyncing = false;
         _hasSynced = false;
         _syncStatus = 'Sync failed';
       });
-      _showMessage('Details updated locally, but could not be synced. $error');
+      _showMessage(
+        'Details updated locally, but could not be synced. $error',
+      );
     }
   }
 
@@ -2671,6 +3330,8 @@ class _HomeScreenState extends State<HomeScreen> {
         onThemeModeChanged: _changeThemeMode,
         isSheetConnected: widget.sheetConfig.isNotEmpty,
         hasActiveFilters: _hasActiveFilters,
+        biometricEnabled: widget.biometricEnabled,
+        onBiometricChanged: widget.onBiometricChanged,
       ),
     );
     if (!mounted || action == null) return;
@@ -2690,7 +3351,21 @@ class _HomeScreenState extends State<HomeScreen> {
       case _SettingsAction.saveContacts:
         await _saveVisibleContacts();
         break;
+      case _SettingsAction.whatsAppTemplates:
+        await _openWhatsAppTemplatesSettings();
+        break;
     }
+  }
+
+  Future<void> _openWhatsAppTemplatesSettings() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ManageWhatsAppTemplatesSheet(
+        settingsStore: _settingsStore,
+      ),
+    );
   }
 
   Future<void> _openSheetSyncSettings() async {
@@ -2804,6 +3479,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _syncStatus = 'Syncing…';
     });
     try {
+      await _flushOfflineQueue();
+
       final sheetStudents = await widget.sheetService.fetchStudentsFromSheet(
         endpoint,
       );
@@ -2811,6 +3488,9 @@ class _HomeScreenState extends State<HomeScreen> {
       final merged = <String, Student>{};
       for (final student in sheetStudents) {
         merged[_studentKey(student)] = student;
+      }
+      for (final queued in _offlineQueue) {
+        merged[_studentKey(queued.student)] = queued.student;
       }
       setState(() {
         _isSelectionMode = false;
@@ -2821,8 +3501,15 @@ class _HomeScreenState extends State<HomeScreen> {
         _isSyncing = false;
         _hasSynced = true;
         _lastSyncTime = _formattedSyncTime();
-        _syncStatus = 'Synced · $_lastSyncTime';
+        if (_offlineQueue.isEmpty) {
+          _syncStatus = 'Synced · $_lastSyncTime';
+        } else {
+          _syncStatus =
+              'Synced · $_lastSyncTime (${_offlineQueue.length} offline queued)';
+        }
       });
+      await _settingsStore.saveCachedStudents(_students);
+      unawaited(_autoScheduleTodayFollowUps(merged.values));
     } on SheetApiException catch (error) {
       if (syncGeneration == _syncGeneration) _showSyncFailure(error.message);
     } on http.ClientException catch (error) {
@@ -2844,6 +3531,50 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _autoScheduleTodayFollowUps(Iterable<Student> students) async {
+    try {
+      final now = DateTime.now();
+      final endOfToday = DateTime(now.year, now.month, now.day + 1);
+
+      final canSchedule =
+          await widget.reminderScheduler.canScheduleExactAlarms();
+      if (!canSchedule) return;
+
+      for (final student in students) {
+        if (isFinalLeadStatus(student.callStatus)) continue;
+        final nextCall = DateTime.tryParse(student.nextCallDateTime);
+        if (nextCall == null) continue;
+
+        if (!nextCall.isBefore(endOfToday) || !nextCall.isAfter(now)) {
+          continue;
+        }
+
+        final alreadyAttempted = student.attempts.any((attempt) {
+          final attemptedAt = DateTime.tryParse(attempt.dateTime);
+          return attemptedAt != null && !attemptedAt.isBefore(nextCall);
+        });
+        if (alreadyAttempted) continue;
+
+        final isScheduled = await widget.reminderScheduler
+            .isStudentReminderScheduled(student, nextCall);
+        if (!isScheduled) {
+          try {
+            await widget.reminderScheduler.scheduleStudentReminder(
+              student,
+              nextCall,
+            );
+          } on Exception catch (error) {
+            debugPrint(
+              'Could not auto-schedule reminder for ${student.name}: $error',
+            );
+          }
+        }
+      }
+    } on Exception catch (error) {
+      debugPrint('Error while auto-scheduling today reminders: $error');
+    }
+  }
+
   String _studentKey(Student student) {
     final digits = student.phone.replaceAll(RegExp(r'\D'), '');
     return digits.isEmpty ? student.name.trim().toLowerCase() : digits;
@@ -2861,7 +3592,11 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isSyncing = false;
       _hasSynced = false;
-      _syncStatus = 'Sync failed';
+      if (_offlineQueue.isNotEmpty) {
+        _syncStatus = 'Sync failed (${_offlineQueue.length} offline queued)';
+      } else {
+        _syncStatus = 'Sync failed';
+      }
     });
     _showMessage(message);
   }
@@ -3051,6 +3786,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     isSyncing: _isSyncing,
                     isConnected: _hasSynced,
                     lastSyncTime: _lastSyncTime,
+                    offlineQueueCount: _offlineQueue.length,
                     onSync: () => _syncWithGoogleSheet(),
                   ),
                 ],
@@ -3210,13 +3946,46 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    final choice = await showModalBottomSheet<_WhatsAppChoice>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _WhatsAppChoiceSheet(student: student),
+    );
+
+    if (choice == null || !mounted) return;
+
+    if (choice == _WhatsAppChoice.custom) {
+      await _launchWhatsApp(number);
+    } else if (choice == _WhatsAppChoice.template) {
+      final templates = await _settingsStore.readWhatsAppTemplates();
+      if (!mounted) return;
+      final selectedMessage = await showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _WhatsAppTemplatePickerSheet(
+          student: student,
+          templates: templates,
+          onManageTemplates: () async {
+            Navigator.pop(context);
+            await _openWhatsAppTemplatesSettings();
+          },
+        ),
+      );
+      if (selectedMessage != null && mounted) {
+        await _launchWhatsApp(number, text: selectedMessage);
+      }
+    }
+  }
+
+  Future<void> _launchWhatsApp(String number, {String? text}) async {
     try {
       final launched = await launchUrl(
-        whatsAppChatUri(number),
+        whatsAppChatUri(number, text: text),
         mode: LaunchMode.externalApplication,
       );
       if (!launched && mounted) {
-        _showMessage('Could not open a WhatsApp chat for ${student.name}.');
+        _showMessage('Could not open WhatsApp.');
       }
     } on Exception catch (error) {
       if (mounted) _showMessage('Could not open WhatsApp: $error');
@@ -4109,6 +4878,7 @@ class _SyncStatusRow extends StatelessWidget {
     required this.isConnected,
     required this.lastSyncTime,
     required this.onSync,
+    this.offlineQueueCount = 0,
   });
 
   final String status;
@@ -4116,13 +4886,17 @@ class _SyncStatusRow extends StatelessWidget {
   final bool isConnected;
   final String? lastSyncTime;
   final VoidCallback onSync;
+  final int offlineQueueCount;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final hasPendingOffline = offlineQueueCount > 0;
     final color = isSyncing
         ? theme.colorScheme.primary
+        : hasPendingOffline
+        ? const Color(0xFFE58A18)
         : isConnected
         ? theme.colorScheme.secondary
         : theme.colorScheme.onSurfaceVariant;
@@ -4133,9 +4907,13 @@ class _SyncStatusRow extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: isDark
-                  ? isConnected
+                  ? hasPendingOffline
+                        ? const Color(0xFF382914)
+                        : isConnected
                         ? const Color(0xFF17382F)
                         : const Color(0xFF263440)
+                  : hasPendingOffline
+                  ? const Color(0xFFFEF6EC)
                   : isConnected
                   ? const Color(0xFFEAF6F2)
                   : const Color(0xFFF0F3F6),
@@ -4154,7 +4932,9 @@ class _SyncStatusRow extends StatelessWidget {
                   )
                 else
                   Icon(
-                    isConnected
+                    hasPendingOffline
+                        ? Icons.cloud_upload_outlined
+                        : isConnected
                         ? Icons.cloud_done_outlined
                         : Icons.cloud_off_outlined,
                     size: 17,
@@ -4173,7 +4953,27 @@ class _SyncStatusRow extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (lastSyncTime != null && isConnected) ...[
+                if (hasPendingOffline) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE58A18).withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '$offlineQueueCount queued',
+                      style: const TextStyle(
+                        color: Color(0xFFE58A18),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ] else if (lastSyncTime != null && isConnected) ...[
                   const SizedBox(width: 6),
                   Text(
                     lastSyncTime!,
@@ -5108,12 +5908,16 @@ class _SettingsHubSheet extends StatelessWidget {
     required this.onThemeModeChanged,
     required this.isSheetConnected,
     required this.hasActiveFilters,
+    required this.biometricEnabled,
+    required this.onBiometricChanged,
   });
 
   final ThemeMode themeMode;
   final Future<void> Function(ThemeMode) onThemeModeChanged;
   final bool isSheetConnected;
   final bool hasActiveFilters;
+  final bool biometricEnabled;
+  final Future<void> Function(bool) onBiometricChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -5255,6 +6059,22 @@ class _SettingsHubSheet extends StatelessWidget {
                       onTap: () =>
                           Navigator.pop(context, _SettingsAction.saveContacts),
                     ),
+                    Divider(
+                      height: 1,
+                      indent: 56,
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.chat_outlined),
+                      title: const Text('WhatsApp templates'),
+                      subtitle: const Text(
+                        'Manage pre-written message templates',
+                      ),
+                      onTap: () => Navigator.pop(
+                        context,
+                        _SettingsAction.whatsAppTemplates,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -5283,6 +6103,27 @@ class _SettingsHubSheet extends StatelessWidget {
                   ),
                   onTap: () =>
                       Navigator.pop(context, _SettingsAction.sheetSync),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Security',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Card(
+                color: theme.colorScheme.surfaceContainerLow,
+                child: SwitchListTile(
+                  secondary: const Icon(Icons.fingerprint_rounded),
+                  title: const Text('Fingerprint Login'),
+                  subtitle: const Text(
+                    'Use fingerprint to log in instead of PIN',
+                  ),
+                  value: biometricEnabled,
+                  onChanged: (val) => unawaited(onBiometricChanged(val)),
                 ),
               ),
               const SizedBox(height: 12),
@@ -5459,6 +6300,7 @@ class _SheetSettingsSheetState extends State<_SheetSettingsSheet> {
                         _urlController.text != _selectedSavedSheet!.url) {
                       setState(() => _selectedSavedSheet = null);
                     }
+                    
                   },
                   decoration: const InputDecoration(
                     labelText: 'Google Apps Script Web App URL',
@@ -5611,6 +6453,645 @@ class _ConnectionBadge extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+enum _WhatsAppChoice { custom, template }
+
+class _WhatsAppChoiceSheet extends StatelessWidget {
+  const _WhatsAppChoiceSheet({required this.student});
+
+  final Student student;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        22,
+        12,
+        22,
+        MediaQuery.viewInsetsOf(context).bottom + 24,
+      ),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                height: 4,
+                width: 40,
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF526170)
+                      : const Color(0xFFDDE3E9),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              'Send WhatsApp Message',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Message to ${student.name}',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Card(
+              color: theme.colorScheme.surfaceContainerLow,
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.chat_bubble_outline),
+                    title: const Text('Custom'),
+                    subtitle: const Text('Open WhatsApp with a blank chat'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.pop(context, _WhatsAppChoice.custom),
+                  ),
+                  Divider(
+                    height: 1,
+                    indent: 56,
+                    color: theme.colorScheme.outlineVariant,
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.text_snippet_outlined),
+                    title: const Text('Template'),
+                    subtitle: const Text('Choose a pre-written message template'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () =>
+                        Navigator.pop(context, _WhatsAppChoice.template),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WhatsAppTemplatePickerSheet extends StatelessWidget {
+  const _WhatsAppTemplatePickerSheet({
+    required this.student,
+    required this.templates,
+    required this.onManageTemplates,
+  });
+
+  final Student student;
+  final List<WhatsAppTemplate> templates;
+  final VoidCallback onManageTemplates;
+
+  String _formatMessage(String template) {
+    final studentName = student.name.trim();
+    return template.replaceAll(
+      '{name}',
+      studentName.isNotEmpty ? studentName : 'there',
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.75,
+      ),
+      padding: EdgeInsets.fromLTRB(
+        22,
+        12,
+        22,
+        MediaQuery.viewInsetsOf(context).bottom + 24,
+      ),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                height: 4,
+                width: 40,
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF526170)
+                      : const Color(0xFFDDE3E9),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Select Template',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Tap a template to send to ${student.name}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: onManageTemplates,
+                  icon: const Icon(Icons.settings_outlined, size: 18),
+                  label: const Text('Manage'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            if (templates.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.text_snippet_outlined,
+                      size: 48,
+                      color: theme.colorScheme.outline,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'No templates found',
+                      style: theme.textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    FilledButton.tonalIcon(
+                      onPressed: onManageTemplates,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Create Template'),
+                    ),
+                  ],
+                ),
+              )
+            else
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: templates.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final item = templates[index];
+                    final preview = _formatMessage(item.message);
+                    return Card(
+                      color: theme.colorScheme.surfaceContainerLow,
+                      margin: EdgeInsets.zero,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () => Navigator.pop(context, preview),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.chat_bubble_outline,
+                                    size: 18,
+                                    color: theme.colorScheme.primary,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      item.name,
+                                      style:
+                                          theme.textTheme.titleSmall?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  Icon(
+                                    Icons.send_rounded,
+                                    size: 16,
+                                    color: theme.colorScheme.primary,
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                preview,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TemplateEditorDialog extends StatefulWidget {
+  const _TemplateEditorDialog({this.template});
+
+  final WhatsAppTemplate? template;
+
+  @override
+  State<_TemplateEditorDialog> createState() => _TemplateEditorDialogState();
+}
+
+class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameController;
+  late final TextEditingController _messageController;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.template?.name ?? '');
+    _messageController =
+        TextEditingController(text: widget.template?.message ?? '');
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _messageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.template == null ? 'Add Template' : 'Edit Template'),
+      content: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                controller: _nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Template Name',
+                  hintText: 'e.g. Class Follow-up',
+                  border: OutlineInputBorder(),
+                ),
+                textCapitalization: TextCapitalization.sentences,
+                validator: (val) {
+                  if (val == null || val.trim().isEmpty) {
+                    return 'Please enter a template name';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _messageController,
+                decoration: const InputDecoration(
+                  labelText: 'Message',
+                  hintText: 'e.g. Hello {name}, your class starts tomorrow.',
+                  helperText: 'Tip: Use {name} for student name',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 4,
+                minLines: 2,
+                textCapitalization: TextCapitalization.sentences,
+                validator: (val) {
+                  if (val == null || val.trim().isEmpty) {
+                    return 'Please enter message content';
+                  }
+                  return null;
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            if (_formKey.currentState?.validate() ?? false) {
+              final result = WhatsAppTemplate(
+                id: widget.template?.id ??
+                    DateTime.now().millisecondsSinceEpoch.toString(),
+                name: _nameController.text.trim(),
+                message: _messageController.text.trim(),
+              );
+              Navigator.pop(context, result);
+            }
+          },
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+class _ManageWhatsAppTemplatesSheet extends StatefulWidget {
+  const _ManageWhatsAppTemplatesSheet({required this.settingsStore});
+
+  final AppSettingsStore settingsStore;
+
+  @override
+  State<_ManageWhatsAppTemplatesSheet> createState() =>
+      _ManageWhatsAppTemplatesSheetState();
+}
+
+class _ManageWhatsAppTemplatesSheetState
+    extends State<_ManageWhatsAppTemplatesSheet> {
+  List<WhatsAppTemplate> _templates = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTemplates();
+  }
+
+  Future<void> _loadTemplates() async {
+    final list = await widget.settingsStore.readWhatsAppTemplates();
+    if (mounted) {
+      setState(() {
+        _templates = List.of(list);
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _saveTemplates() async {
+    await widget.settingsStore.saveWhatsAppTemplates(_templates);
+  }
+
+  Future<void> _addOrEditTemplate([WhatsAppTemplate? existing]) async {
+    final saved = await showDialog<WhatsAppTemplate>(
+      context: context,
+      builder: (_) => _TemplateEditorDialog(template: existing),
+    );
+
+    if (saved != null && mounted) {
+      setState(() {
+        if (existing == null) {
+          _templates.add(saved);
+        } else {
+          final index = _templates.indexWhere((t) => t.id == existing.id);
+          if (index != -1) {
+            _templates[index] = saved;
+          }
+        }
+      });
+      await _saveTemplates();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              existing == null ? 'Template added' : 'Template updated',
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteTemplate(WhatsAppTemplate template) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Delete Template'),
+        content: Text('Are you sure you want to delete "${template.name}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(dialogCtx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      setState(() {
+        _templates.removeWhere((t) => t.id == template.id);
+      });
+      await _saveTemplates();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Template deleted'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+      ),
+      padding: EdgeInsets.fromLTRB(
+        22,
+        12,
+        22,
+        MediaQuery.viewInsetsOf(context).bottom + 24,
+      ),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                height: 4,
+                width: 40,
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF526170)
+                      : const Color(0xFFDDE3E9),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'WhatsApp Templates',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                FilledButton.icon(
+                  onPressed: () => _addOrEditTemplate(),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Add'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Pre-written messages with {name} placeholder support.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (_isLoading)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(32),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else if (_templates.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 36),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.chat_bubble_outline,
+                      size: 48,
+                      color: theme.colorScheme.outline,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'No templates yet',
+                      style: theme.textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Tap "Add" to create your first WhatsApp template.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: _templates.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final item = _templates[index];
+                    return Card(
+                      color: theme.colorScheme.surfaceContainerLow,
+                      margin: EdgeInsets.zero,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    item.name,
+                                    style:
+                                        theme.textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.edit_outlined,
+                                    size: 20,
+                                  ),
+                                  tooltip: 'Edit template',
+                                  onPressed: () => _addOrEditTemplate(item),
+                                ),
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.delete_outline,
+                                    size: 20,
+                                    color: theme.colorScheme.error,
+                                  ),
+                                  tooltip: 'Delete template',
+                                  onPressed: () => _deleteTemplate(item),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              item.message,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

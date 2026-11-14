@@ -36,6 +36,22 @@ class FakeReminderScheduler implements ReminderScheduler {
   Future<void> cancelStudentReminder(Student student) async {
     cancelled.add(student);
   }
+
+  @override
+  Future<bool> isStudentReminderScheduled(
+    Student student, [
+    DateTime? dateTime,
+  ]) async {
+    final phone = normalizeContactPhone(student.phone);
+    return scheduled.any((item) {
+      final itemPhone = normalizeContactPhone(item.student.phone);
+      if (itemPhone != phone) return false;
+      if (dateTime != null) {
+        return item.dateTime.isAtSameMomentAs(dateTime);
+      }
+      return true;
+    });
+  }
 }
 
 class FakeDeviceContactsService implements DeviceContactsService {
@@ -57,7 +73,7 @@ Widget testApp({
 }) {
   return StudentCallApp(
     httpClient: httpClient,
-    reminderScheduler: reminderScheduler,
+    reminderScheduler: reminderScheduler ?? FakeReminderScheduler(),
     settingsStore: settingsStore ?? MemoryAppSettingsStore(),
     deviceContactsService: deviceContactsService,
   );
@@ -90,6 +106,10 @@ void main() {
     expect(
       whatsAppChatUri('070 106 1244').toString(),
       'https://wa.me/94701061244',
+    );
+    expect(
+      whatsAppChatUri('070 106 1244', text: 'Hello Kasun!').toString(),
+      'https://wa.me/94701061244?text=Hello+Kasun%21',
     );
     expect(
       whatsAppChatUri('+1 (555) 010-1234').toString(),
@@ -158,6 +178,14 @@ void main() {
       ),
       isTrue,
     );
+  });
+
+  test('recognizes closed lead statuses and legacy spellings', () {
+    expect(isFinalLeadStatus(' Not Interested '), isTrue);
+    expect(isFinalLeadStatus('Not Potential'), isTrue);
+    expect(isFinalLeadStatus('Not Protencial'), isTrue);
+    expect(isFinalLeadStatus('Not Pretencial'), isTrue);
+    expect(isFinalLeadStatus('Interested'), isFalse);
   });
 
   test('marks connection activity green, orange, and red by elapsed days', () {
@@ -991,6 +1019,69 @@ void main() {
     expect(find.text('Old Lead'), findsNothing);
   });
 
+  testWidgets('hides closed leads and shows separate report categories', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1100);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final settingsStore = MemoryAppSettingsStore()
+      ..pin = '2580'
+      ..sheetConfig = 'https://script.google.com/macros/s/test/exec';
+    final client = MockClient(
+      (_) async => http.Response(
+        jsonEncode({
+          'students': [
+            {
+              'name': 'Active Lead',
+              'contact': '555-0611',
+              'callStatus': 'Interested',
+              'attempts': [],
+            },
+            {
+              'name': 'Not Interested Lead',
+              'contact': '555-0612',
+              'callStatus': 'Not Interested',
+              'attempts': [],
+            },
+            {
+              'name': 'Not Potential Lead',
+              'contact': '555-0613',
+              'callStatus': 'Not Potential',
+              'attempts': [],
+            },
+          ],
+        }),
+        200,
+      ),
+    );
+
+    await tester.pumpWidget(
+      testApp(httpClient: client, settingsStore: settingsStore),
+    );
+    await tester.pumpAndSettle();
+    await enterPin(tester, '2580');
+    await tester.pumpAndSettle();
+
+    expect(find.text('Active Lead'), findsOneWidget);
+    expect(find.text('Not Interested Lead'), findsNothing);
+    expect(find.text('Not Potential Lead'), findsNothing);
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Lead reports'));
+    await tester.tap(find.text('Lead reports'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Not Interested'), findsOneWidget);
+    expect(find.text('Not Potential'), findsOneWidget);
+    expect(find.text('1 student(s) · Export CSV'), findsNWidgets(2));
+    expect(find.text('Not Interested Lead'), findsNothing);
+    expect(find.text('Not Potential Lead'), findsNothing);
+  });
+
   testWidgets('New Leads shows pending only, regardless of lead age', (
     tester,
   ) async {
@@ -1595,6 +1686,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Google Sheets Sync'));
     await tester.tap(find.text('Google Sheets Sync'));
     await tester.pumpAndSettle();
     await tester.tap(find.byType(DropdownButtonFormField<LinkedSheet>));
@@ -1611,4 +1703,283 @@ void main() {
     expect(settingsStore.sheetConfig, secondUrl);
     expect(settingsStore.sheetName, 'Second sheet');
   });
+
+  testWidgets(
+    'auto-schedules unscheduled today follow-up reminders when syncing',
+    (tester) async {
+      final now = DateTime.now();
+      final todayFutureCall = now.add(const Duration(hours: 2));
+      final alreadyScheduledCall = now.add(const Duration(hours: 3));
+
+      final reminderScheduler = FakeReminderScheduler();
+      final alreadyScheduledStudent = Student(
+        name: 'Already Scheduled',
+        phone: '555-0801',
+        nextCallDateTime: alreadyScheduledCall.toIso8601String(),
+      );
+      await reminderScheduler.scheduleStudentReminder(
+        alreadyScheduledStudent,
+        alreadyScheduledCall,
+      );
+
+      final students = [
+        {
+          'name': 'Already Scheduled',
+          'contact': '555-0801',
+          'addedDate': now.toIso8601String(),
+          'nextCallDateTime': alreadyScheduledCall.toIso8601String(),
+          'callStatus': 'Interested',
+          'attempts': [],
+        },
+        {
+          'name': 'Needs Scheduling',
+          'contact': '555-0802',
+          'addedDate': now.toIso8601String(),
+          'nextCallDateTime': todayFutureCall.toIso8601String(),
+          'callStatus': 'Pending',
+          'attempts': [],
+        },
+        {
+          'name': 'Past Call',
+          'contact': '555-0803',
+          'addedDate': now.toIso8601String(),
+          'nextCallDateTime':
+              now.subtract(const Duration(hours: 1)).toIso8601String(),
+          'callStatus': 'Pending',
+          'attempts': [],
+        },
+      ];
+
+      final settingsStore = MemoryAppSettingsStore()
+        ..pin = '2580'
+        ..sheetConfig = 'https://script.google.com/macros/s/test/exec';
+      final client = MockClient(
+        (_) async => http.Response(jsonEncode({'students': students}), 200),
+      );
+
+      await tester.pumpWidget(
+        testApp(
+          httpClient: client,
+          settingsStore: settingsStore,
+          reminderScheduler: reminderScheduler,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await enterPin(tester, '2580');
+      await tester.pumpAndSettle();
+
+      expect(reminderScheduler.scheduled, hasLength(2));
+      expect(
+        reminderScheduler.scheduled.map((item) => item.student.name),
+        containsAll(['Already Scheduled', 'Needs Scheduling']),
+      );
+    },
+  );
+
+  testWidgets(
+    'queues offline updates when network fails and auto-syncs when online',
+    (tester) async {
+      final initialStudent = {
+        'name': 'Kamal Perera',
+        'contact': '555-0901',
+        'addedDate': DateTime.now().toIso8601String(),
+        'callStatus': 'Pending',
+        'comment': 'Initial comment',
+        'attempts': [],
+      };
+
+      var shouldFailPost = true;
+      final postedRequests = <http.Request>[];
+
+      final client = MockClient((request) async {
+        if (request.method == 'GET') {
+          return http.Response(
+            jsonEncode({
+              'students': [initialStudent],
+            }),
+            200,
+          );
+        }
+        if (request.method == 'POST') {
+          if (shouldFailPost) {
+            throw http.ClientException('No internet connection');
+          }
+          postedRequests.add(request);
+          return http.Response('{"success":true}', 200);
+        }
+        return http.Response('Not found', 404);
+      });
+
+      final settingsStore = MemoryAppSettingsStore()
+        ..pin = '2580'
+        ..sheetConfig = 'https://script.google.com/macros/s/test/exec';
+
+      await tester.pumpWidget(
+        testApp(httpClient: client, settingsStore: settingsStore),
+      );
+      await tester.pumpAndSettle();
+      await enterPin(tester, '2580');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Kamal Perera'), findsOneWidget);
+
+      await tester.tap(find.text('Kamal Perera'));
+      await tester.pumpAndSettle();
+
+      final commentField = find.byType(TextFormField).at(7);
+      await tester.enterText(commentField, 'Offline call notes');
+      await tester.ensureVisible(find.text('Update Details'));
+      await tester.tap(find.text('Update Details'));
+      await tester.pumpAndSettle();
+
+      expect(settingsStore.offlineQueue, hasLength(1));
+      expect(
+        settingsStore.offlineQueue.first.student.comment,
+        'Offline call notes',
+      );
+      expect(find.textContaining('queued'), findsWidgets);
+
+      shouldFailPost = false;
+      await tester.tap(find.text('Sync now'));
+      await tester.pumpAndSettle();
+
+      expect(settingsStore.offlineQueue, isEmpty);
+      expect(postedRequests, hasLength(1));
+      final payload =
+          jsonDecode(postedRequests.first.body) as Map<String, dynamic>;
+      expect(payload['comment'], 'Offline call notes');
+    },
+  );
+
+  testWidgets(
+    'manages WhatsApp templates in Settings and verifies persistence',
+    (tester) async {
+      final initialStudent = {
+        'name': 'Kamal Perera',
+        'contact': '0701061244',
+        'addedDate': DateTime.now().toIso8601String(),
+        'callStatus': 'Pending',
+        'comment': '',
+        'attempts': [],
+      };
+      final client = MockClient((request) async {
+        if (request.method == 'GET') {
+          return http.Response(
+            jsonEncode({
+              'students': [initialStudent],
+            }),
+            200,
+          );
+        }
+        return http.Response('{"success":true}', 200);
+      });
+
+      final settingsStore = MemoryAppSettingsStore()
+        ..pin = '2580'
+        ..sheetConfig = 'https://script.google.com/macros/s/test/exec';
+
+      await tester.pumpWidget(
+        testApp(httpClient: client, settingsStore: settingsStore),
+      );
+      await tester.pumpAndSettle();
+      await enterPin(tester, '2580');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('WhatsApp templates'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('WhatsApp Templates'), findsOneWidget);
+      expect(find.text('General Follow-up'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Add'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Add Template'), findsOneWidget);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Template Name'),
+        'Special Offer',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Message'),
+        'Hello {name}, 20% discount!',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Special Offer'), findsOneWidget);
+      final savedTemplates = await settingsStore.readWhatsAppTemplates();
+      expect(
+        savedTemplates.any(
+          (t) =>
+              t.name == 'Special Offer' &&
+              t.message == 'Hello {name}, 20% discount!',
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  testWidgets(
+    'tapping WhatsApp action offers Custom and Template choices',
+    (tester) async {
+      final initialStudent = {
+        'name': 'Kamal Perera',
+        'contact': '0701061244',
+        'addedDate': DateTime.now().toIso8601String(),
+        'callStatus': 'Pending',
+        'comment': '',
+        'attempts': [],
+      };
+      final client = MockClient((request) async {
+        if (request.method == 'GET') {
+          return http.Response(
+            jsonEncode({
+              'students': [initialStudent],
+            }),
+            200,
+          );
+        }
+        return http.Response('{"success":true}', 200);
+      });
+
+      final settingsStore = MemoryAppSettingsStore()
+        ..pin = '2580'
+        ..sheetConfig = 'https://script.google.com/macros/s/test/exec';
+
+      await tester.pumpWidget(
+        testApp(httpClient: client, settingsStore: settingsStore),
+      );
+      await tester.pumpAndSettle();
+      await enterPin(tester, '2580');
+      await tester.pumpAndSettle();
+
+      final firstWhatsAppBtn = find.byTooltip('Open WhatsApp chat').first;
+      await tester.tap(firstWhatsAppBtn);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Send WhatsApp Message'), findsOneWidget);
+      expect(find.text('Custom'), findsOneWidget);
+      expect(find.text('Template'), findsOneWidget);
+
+      await tester.tap(find.text('Template'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Select Template'), findsOneWidget);
+      expect(find.text('General Follow-up'), findsOneWidget);
+      expect(
+        find.textContaining(
+          'Hello Kamal Perera, following up on our recent conversation.',
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('General Follow-up'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Select Template'), findsNothing);
+    },
+  );
 }

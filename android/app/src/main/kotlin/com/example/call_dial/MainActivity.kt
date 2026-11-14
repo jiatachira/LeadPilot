@@ -6,11 +6,11 @@ import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.media.Ringtone
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
     private val channelName = "com.example.call_dial/ringtone"
     private var ringtone: Ringtone? = null
 
