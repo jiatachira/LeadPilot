@@ -124,9 +124,13 @@ void main() {
     );
   });
 
-  test('builds SMS composer links with normalized phone numbers', () {
+  test('builds SMS composer links with normalized phone numbers and optional body', () {
     expect(smsComposerUri('070 106 1244').toString(), 'sms:+94701061244');
     expect(smsComposerUri('+1 (555) 010-1234').toString(), 'sms:+15550101234');
+    expect(
+      smsComposerUri('070 106 1244', body: 'Hello student').toString(),
+      'sms:+94701061244?body=Hello+student',
+    );
   });
 
   test('allocates stable, distinct reminder notification IDs per phone', () {
@@ -1414,7 +1418,7 @@ void main() {
       await enterPin(tester, '2580');
       await tester.pumpAndSettle();
 
-      expect(find.byTooltip('Comments'), findsNWidgets(2));
+      expect(find.byTooltip('Call history'), findsNWidgets(2));
       expect(find.byTooltip('Open WhatsApp chat'), findsNWidgets(2));
       expect(find.byTooltip('Send SMS'), findsNWidgets(2));
       expect(find.byTooltip('Call student'), findsNWidgets(2));
@@ -1609,7 +1613,7 @@ void main() {
     await enterPin(tester, '2580');
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Comments'));
+    await tester.tap(find.byTooltip('Call history'));
     await tester.pumpAndSettle();
 
     expect(find.text('Call history · Mia Patel'), findsOneWidget);
@@ -1936,10 +1940,10 @@ void main() {
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('WhatsApp templates'));
+      await tester.tap(find.text('WhatsApp & SMS templates'));
       await tester.pumpAndSettle();
 
-      expect(find.text('WhatsApp Templates'), findsOneWidget);
+      expect(find.text('WhatsApp & SMS Templates'), findsOneWidget);
       expect(find.text('General Follow-up'), findsOneWidget);
 
       await tester.tap(find.widgetWithText(FilledButton, 'Add'));
@@ -2249,7 +2253,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.13.0'), findsOneWidget);
+    expect(find.text('LeadPilot v1.14.0'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -2360,6 +2364,60 @@ void main() {
     expect(find.text('Template'), findsOneWidget);
     expect(find.text('Generate with AI'), findsOneWidget);
     expect(find.text('Gemini'), findsOneWidget);
+  });
+
+  testWidgets('SMS choice sheet displays Custom, Template, and Generate with AI',
+      (tester) async {
+    const student = Student(
+      name: 'Nimal Bandara',
+      phone: '0712345678',
+    );
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: SmsChoiceSheet(student: student),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Send SMS Message'), findsOneWidget);
+    expect(find.text('SMS to Nimal Bandara'), findsOneWidget);
+    expect(find.text('Custom'), findsOneWidget);
+    expect(find.text('Open SMS app with a blank message'), findsOneWidget);
+    expect(find.text('Template'), findsOneWidget);
+    expect(find.text('Generate with AI'), findsOneWidget);
+    expect(find.text('Gemini'), findsOneWidget);
+  });
+
+  testWidgets('StudentCard displays history button with Icons.history_rounded',
+      (tester) async {
+    const student = Student(
+      name: 'Test Student',
+      phone: '0712345678',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StudentCard(
+            student: student,
+            onTap: () {},
+            onLongPress: () {},
+            onCall: () {},
+            onWhatsApp: () {},
+            onSms: () {},
+            onNote: () {},
+            onSaveContact: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Call history'), findsOneWidget);
+    expect(find.byIcon(Icons.history_rounded), findsOneWidget);
   });
 
   test('GeminiService.sanitizeApiKey correctly cleans messy input keys', () {

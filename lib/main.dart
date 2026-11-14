@@ -129,9 +129,17 @@ String normalizeContactPhone(String phoneNumber) {
   return digits;
 }
 
-Uri smsComposerUri(String phoneNumber) {
+Uri smsComposerUri(String phoneNumber, {String? body}) {
   final digits = normalizeContactPhone(phoneNumber);
-  return Uri(scheme: 'sms', path: digits.isEmpty ? '' : '+$digits');
+  final path = digits.isEmpty ? '' : '+$digits';
+  if (body != null && body.trim().isNotEmpty) {
+    return Uri(
+      scheme: 'sms',
+      path: path,
+      queryParameters: <String, String>{'body': body.trim()},
+    );
+  }
+  return Uri(scheme: 'sms', path: path);
 }
 
 bool isNotInterestedStatus(String status) =>
@@ -5279,7 +5287,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    final choice = await showModalBottomSheet<_WhatsAppChoice>(
+    final choice = await showModalBottomSheet<_MessageChoice>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -5288,9 +5296,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (choice == null || !mounted) return;
 
-    if (choice == _WhatsAppChoice.custom) {
+    if (choice == _MessageChoice.custom) {
       await _launchWhatsApp(number);
-    } else if (choice == _WhatsAppChoice.template) {
+    } else if (choice == _MessageChoice.template) {
       final templates = await _settingsStore.readWhatsAppTemplates();
       if (!mounted) return;
       final selectedMessage = await showModalBottomSheet<String>(
@@ -5300,6 +5308,7 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => _WhatsAppTemplatePickerSheet(
           student: student,
           templates: templates,
+          isSms: false,
           onManageTemplates: () async {
             Navigator.pop(context);
             await _openWhatsAppTemplatesSettings();
@@ -5309,7 +5318,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (selectedMessage != null && mounted) {
         await _launchWhatsApp(number, text: selectedMessage);
       }
-    } else if (choice == _WhatsAppChoice.ai) {
+    } else if (choice == _MessageChoice.ai) {
       final apiKey = await _settingsStore.readGeminiApiKey();
       if (!mounted) return;
       final selectedMessage = await showModalBottomSheet<String>(
@@ -5320,6 +5329,7 @@ class _HomeScreenState extends State<HomeScreen> {
           student: student,
           initialApiKey: apiKey,
           settingsStore: _settingsStore,
+          isSms: false,
         ),
       );
       if (selectedMessage != null &&
@@ -5345,18 +5355,74 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _sendStudentSms(Student student) async {
-    if (normalizeContactPhone(student.phone).isEmpty) {
+    final number = student.phone;
+    final digits = normalizeContactPhone(number);
+    if (digits.isEmpty) {
       _showMessage('No valid phone number is available for ${student.name}.');
       return;
     }
 
+    final choice = await showModalBottomSheet<_MessageChoice>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => SmsChoiceSheet(student: student),
+    );
+
+    if (choice == null || !mounted) return;
+
+    if (choice == _MessageChoice.custom) {
+      await _launchSms(number);
+    } else if (choice == _MessageChoice.template) {
+      final templates = await _settingsStore.readWhatsAppTemplates();
+      if (!mounted) return;
+      final selectedMessage = await showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _WhatsAppTemplatePickerSheet(
+          student: student,
+          templates: templates,
+          isSms: true,
+          onManageTemplates: () async {
+            Navigator.pop(context);
+            await _openWhatsAppTemplatesSettings();
+          },
+        ),
+      );
+      if (selectedMessage != null && mounted) {
+        await _launchSms(number, text: selectedMessage);
+      }
+    } else if (choice == _MessageChoice.ai) {
+      final apiKey = await _settingsStore.readGeminiApiKey();
+      if (!mounted) return;
+      final selectedMessage = await showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => GeminiAiMessageSheet(
+          student: student,
+          initialApiKey: apiKey,
+          settingsStore: _settingsStore,
+          isSms: true,
+        ),
+      );
+      if (selectedMessage != null &&
+          selectedMessage.trim().isNotEmpty &&
+          mounted) {
+        await _launchSms(number, text: selectedMessage.trim());
+      }
+    }
+  }
+
+  Future<void> _launchSms(String number, {String? text}) async {
     try {
       final launched = await launchUrl(
-        smsComposerUri(student.phone),
+        smsComposerUri(number, body: text),
         mode: LaunchMode.externalApplication,
       );
       if (!launched && mounted) {
-        _showMessage('Could not open the SMS composer for ${student.name}.');
+        _showMessage('Could not open the SMS composer for number $number.');
       }
     } on Exception catch (error) {
       if (mounted) _showMessage('Could not open SMS: $error');
@@ -6143,10 +6209,10 @@ class StudentCard extends StatelessWidget {
                           children: [
                             _QuickActionButton(
                               icon: const Icon(
-                                Icons.chat_bubble_outline_rounded,
+                                Icons.history_rounded,
                                 size: 19,
                               ),
-                              tooltip: 'Comments',
+                              tooltip: 'Call history',
                               onPressed: onNote,
                               backgroundColor: isDark
                                   ? const Color(0xFF2B3947)
@@ -7627,7 +7693,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                     ),
                     ListTile(
                       leading: const Icon(Icons.chat_outlined),
-                      title: const Text('WhatsApp templates'),
+                      title: const Text('WhatsApp & SMS templates'),
                       subtitle: const Text(
                         'Manage pre-written message templates',
                       ),
@@ -7824,7 +7890,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.13.0',
+                    'LeadPilot v1.14.0',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,
@@ -8160,12 +8226,39 @@ class _ConnectionBadge extends StatelessWidget {
   }
 }
 
-enum _WhatsAppChoice { custom, template, ai }
+enum _MessageChoice { custom, template, ai }
 
 class WhatsAppChoiceSheet extends StatelessWidget {
   const WhatsAppChoiceSheet({super.key, required this.student});
 
   final Student student;
+
+  @override
+  Widget build(BuildContext context) {
+    return MessageChoiceSheet(student: student, isSms: false);
+  }
+}
+
+class SmsChoiceSheet extends StatelessWidget {
+  const SmsChoiceSheet({super.key, required this.student});
+
+  final Student student;
+
+  @override
+  Widget build(BuildContext context) {
+    return MessageChoiceSheet(student: student, isSms: true);
+  }
+}
+
+class MessageChoiceSheet extends StatelessWidget {
+  const MessageChoiceSheet({
+    super.key,
+    required this.student,
+    this.isSms = false,
+  });
+
+  final Student student;
+  final bool isSms;
 
   @override
   Widget build(BuildContext context) {
@@ -8204,14 +8297,14 @@ class WhatsAppChoiceSheet extends StatelessWidget {
               ),
               const SizedBox(height: 18),
               Text(
-                'Send WhatsApp Message',
+                isSms ? 'Send SMS Message' : 'Send WhatsApp Message',
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w800,
                 ),
               ),
               const SizedBox(height: 4),
               Text(
-                'Message to ${student.name}',
+                isSms ? 'SMS to ${student.name}' : 'Message to ${student.name}',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -8222,12 +8315,19 @@ class WhatsAppChoiceSheet extends StatelessWidget {
                 child: Column(
                   children: [
                     ListTile(
-                      leading: const Icon(Icons.chat_bubble_outline),
+                      leading: Icon(
+                        isSms ? Icons.sms_outlined : Icons.chat_bubble_outline,
+                        color: isSms ? const Color(0xFF2E6FA3) : null,
+                      ),
                       title: const Text('Custom'),
-                      subtitle: const Text('Open WhatsApp with a blank chat'),
+                      subtitle: Text(
+                        isSms
+                            ? 'Open SMS app with a blank message'
+                            : 'Open WhatsApp with a blank chat',
+                      ),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () =>
-                          Navigator.pop(context, _WhatsAppChoice.custom),
+                          Navigator.pop(context, _MessageChoice.custom),
                     ),
                     Divider(
                       height: 1,
@@ -8241,7 +8341,7 @@ class WhatsAppChoiceSheet extends StatelessWidget {
                           const Text('Choose a pre-written message template'),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () =>
-                          Navigator.pop(context, _WhatsAppChoice.template),
+                          Navigator.pop(context, _MessageChoice.template),
                     ),
                     Divider(
                       height: 1,
@@ -8282,7 +8382,7 @@ class WhatsAppChoiceSheet extends StatelessWidget {
                         'Personalized message based on call notes',
                       ),
                       trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () => Navigator.pop(context, _WhatsAppChoice.ai),
+                      onTap: () => Navigator.pop(context, _MessageChoice.ai),
                     ),
                   ],
                 ),
@@ -8300,11 +8400,13 @@ class _WhatsAppTemplatePickerSheet extends StatelessWidget {
     required this.student,
     required this.templates,
     required this.onManageTemplates,
+    this.isSms = false,
   });
 
   final Student student;
   final List<WhatsAppTemplate> templates;
   final VoidCallback onManageTemplates;
+  final bool isSms;
 
   String _formatMessage(String template) {
     final studentName = student.name.trim();
@@ -8366,7 +8468,9 @@ class _WhatsAppTemplatePickerSheet extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Tap a template to send to ${student.name}',
+                        isSms
+                            ? 'Tap a template to send via SMS to ${student.name}'
+                            : 'Tap a template to send to ${student.name}',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -8430,9 +8534,13 @@ class _WhatsAppTemplatePickerSheet extends StatelessWidget {
                               Row(
                                 children: [
                                   Icon(
-                                    Icons.chat_bubble_outline,
+                                    isSms
+                                        ? Icons.sms_outlined
+                                        : Icons.chat_bubble_outline,
                                     size: 18,
-                                    color: theme.colorScheme.primary,
+                                    color: isSms
+                                        ? const Color(0xFF2E6FA3)
+                                        : theme.colorScheme.primary,
                                   ),
                                   const SizedBox(width: 8),
                                   Expanded(
@@ -8738,7 +8846,7 @@ class _ManageWhatsAppTemplatesSheetState
               children: [
                 Expanded(
                   child: Text(
-                    'WhatsApp Templates',
+                    'WhatsApp & SMS Templates',
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w800,
                     ),
@@ -8753,7 +8861,7 @@ class _ManageWhatsAppTemplatesSheetState
             ),
             const SizedBox(height: 6),
             Text(
-              'Pre-written messages with {name} placeholder support.',
+              'Pre-written messages for WhatsApp & SMS with {name} placeholder support.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -9313,12 +9421,14 @@ class GeminiAiMessageSheet extends StatefulWidget {
     required this.initialApiKey,
     required this.settingsStore,
     this.geminiService,
+    this.isSms = false,
   });
 
   final Student student;
   final String initialApiKey;
   final AppSettingsStore settingsStore;
   final GeminiService? geminiService;
+  final bool isSms;
 
   @override
   State<GeminiAiMessageSheet> createState() => _GeminiAiMessageSheetState();
@@ -9547,7 +9657,9 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Generate AI Message',
+                          widget.isSms
+                              ? 'Generate SMS with AI'
+                              : 'Generate AI Message',
                           style: theme.textTheme.titleLarge?.copyWith(
                             fontWeight: FontWeight.w800,
                           ),
@@ -9591,7 +9703,7 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'To generate custom WhatsApp messages, paste your free Google Gemini API key below. You can get one in seconds from Google AI Studio without a credit card.',
+                          'To generate personalized messages, paste your free Google Gemini API key below. You can get one in seconds from Google AI Studio without a credit card.',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                             height: 1.4,
@@ -9877,10 +9989,14 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
                   ElevatedButton.icon(
                     onPressed: () =>
                         Navigator.pop(context, _messageController.text),
-                    icon: const FaIcon(FontAwesomeIcons.whatsapp, size: 18),
-                    label: const Text('Send on WhatsApp'),
+                    icon: widget.isSms
+                        ? const Icon(Icons.sms_rounded, size: 18)
+                        : const FaIcon(FontAwesomeIcons.whatsapp, size: 18),
+                    label: Text(widget.isSms ? 'Send via SMS' : 'Send on WhatsApp'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF25D366),
+                      backgroundColor: widget.isSms
+                          ? const Color(0xFF2E6FA3)
+                          : const Color(0xFF25D366),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       elevation: 2,
