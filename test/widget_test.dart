@@ -2258,7 +2258,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.14.1'), findsOneWidget);
+    expect(find.text('LeadPilot v1.15.0'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -2596,9 +2596,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Gemini AI Assistant'), findsOneWidget);
-    expect(find.text('Test Key'), findsOneWidget);
+    final testFinder = find.text('Test Key');
+    expect(testFinder, findsOneWidget);
 
-    await tester.tap(find.text('Test Key'));
+    await tester.ensureVisible(testFinder);
+    await tester.tap(testFinder);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Connection successful'), findsOneWidget);
@@ -2788,5 +2790,121 @@ void main() {
     await tester.tap(find.byType(AppSplashScreen));
     await tester.pump();
     expect(finished, isTrue);
+  });
+
+  test('MemoryAppSettingsStore stores and reads default and custom companyDescription', () async {
+    final store = MemoryAppSettingsStore();
+    expect(await store.readCompanyDescription(), contains('LNBTI'));
+
+    await store.saveCompanyDescription('Custom Institute of Technology');
+    expect(await store.readCompanyDescription(), 'Custom Institute of Technology');
+
+    // Blank description should reset to default
+    await store.saveCompanyDescription('   ');
+    expect(await store.readCompanyDescription(), contains('LNBTI'));
+  });
+
+  test('GeminiService includes LNBTI company context and balanced tone rules in prompt', () async {
+    String? sentPrompt;
+    final mockClient = MockClient((request) async {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      final contents = body['contents'] as List;
+      final parts = contents.first['parts'] as List;
+      sentPrompt = parts.first['text'] as String;
+      return http.Response(
+        jsonEncode({
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {'text': 'Hello Kasun from LNBTI!'}
+                ]
+              }
+            }
+          ]
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
+    final service = GeminiService(client: mockClient);
+    const student = Student(
+      name: 'Kasun Bandara',
+      phone: '0711122334',
+      callStatus: 'Interested',
+      comment: 'Wants IT degree info',
+    );
+
+    final msg = await service.generateFollowUp(
+      apiKey: 'test_key',
+      student: student,
+      language: 'English',
+    );
+
+    expect(msg, 'Hello Kasun from LNBTI!');
+    expect(sentPrompt, contains('LNBTI'));
+    expect(sentPrompt, contains('Neither overly stiff/robotic nor overly casual/slangy'));
+    expect(sentPrompt, contains('DO NOT OVER-DETAIL'));
+  });
+
+  testWidgets('ManageGeminiAiSheet displays and updates Description about your company', (tester) async {
+    final store = MemoryAppSettingsStore();
+    final service = GeminiService();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ManageGeminiAiSheet(
+            settingsStore: store,
+            geminiService: service,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Description about your company'), findsOneWidget);
+    expect(find.text(store.companyDescription), findsOneWidget);
+
+    // Enter a new company description
+    final descField = find.widgetWithText(TextField, store.companyDescription);
+    await tester.ensureVisible(descField);
+    await tester.enterText(descField, 'LNBTI Higher Education Campus');
+    await tester.pumpAndSettle();
+
+    final saveFinder = find.text('Save Key');
+    await tester.ensureVisible(saveFinder);
+    await tester.tap(saveFinder);
+    await tester.pumpAndSettle();
+
+    expect(await store.readCompanyDescription(), 'LNBTI Higher Education Campus');
+  });
+
+  testWidgets('GeminiAiMessageSheet displays representation badge on behalf of LNBTI', (tester) async {
+    final store = MemoryAppSettingsStore();
+    final service = GeminiService();
+
+    const student = Student(
+      name: 'Saman Kumara',
+      phone: '0779988776',
+      callStatus: 'Interested',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: GeminiAiMessageSheet(
+            student: student,
+            initialApiKey: 'test_key',
+            settingsStore: store,
+            geminiService: service,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('On behalf of: LNBTI'), findsOneWidget);
   });
 }

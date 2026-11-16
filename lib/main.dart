@@ -633,6 +633,9 @@ class NativeDeviceContactsService implements DeviceContactsService {
   }
 }
 
+const String _defaultCompanyDescription =
+    'LNBTI (Lanka Nippon BizTech Institute) - Japanese-based Higher Education Institute in Sri Lanka offering IT & Computing degrees with Japanese language and pathway to careers in Japan.';
+
 abstract interface class AppSettingsStore {
   Future<String?> readPin();
 
@@ -673,6 +676,10 @@ abstract interface class AppSettingsStore {
   Future<String> readGeminiModel();
 
   Future<void> saveGeminiModel(String model);
+
+  Future<String> readCompanyDescription();
+
+  Future<void> saveCompanyDescription(String description);
 }
 
 class SecureAppSettingsStore implements AppSettingsStore {
@@ -690,6 +697,7 @@ class SecureAppSettingsStore implements AppSettingsStore {
   static const _whatsAppTemplatesKey = 'student_call_whatsapp_templates';
   static const _geminiApiKeyKey = 'student_call_gemini_api_key';
   static const _geminiModelKey = 'student_call_gemini_model';
+  static const _companyDescriptionKey = 'student_call_company_description';
   final FlutterSecureStorage _storage;
 
   @override
@@ -829,6 +837,24 @@ class SecureAppSettingsStore implements AppSettingsStore {
       _storage.write(key: _geminiModelKey, value: model.trim());
 
   @override
+  Future<String> readCompanyDescription() async {
+    final value = await _storage.read(key: _companyDescriptionKey);
+    if (value == null || value.trim().isEmpty) {
+      return _defaultCompanyDescription;
+    }
+    return value.trim();
+  }
+
+  @override
+  Future<void> saveCompanyDescription(String description) =>
+      _storage.write(
+        key: _companyDescriptionKey,
+        value: description.trim().isEmpty
+            ? _defaultCompanyDescription
+            : description.trim(),
+      );
+
+  @override
   Future<void> saveSheetConfig(String url, {String name = ''}) async {
     final normalizedUrl = url.trim();
     final linkedSheets = await readLinkedSheets();
@@ -955,6 +981,7 @@ class MemoryAppSettingsStore implements AppSettingsStore {
   }
 
   String geminiModel = 'gemini-1.5-flash';
+  String companyDescription = _defaultCompanyDescription;
 
   @override
   Future<String> readGeminiModel() async => geminiModel;
@@ -962,6 +989,16 @@ class MemoryAppSettingsStore implements AppSettingsStore {
   @override
   Future<void> saveGeminiModel(String model) async {
     geminiModel = model.trim();
+  }
+
+  @override
+  Future<String> readCompanyDescription() async => companyDescription;
+
+  @override
+  Future<void> saveCompanyDescription(String description) async {
+    companyDescription = description.trim().isEmpty
+        ? _defaultCompanyDescription
+        : description.trim();
   }
 }
 
@@ -3165,6 +3202,7 @@ enum _SettingsAction {
   saveContacts,
   whatsAppTemplates,
   geminiAi,
+  companyDescription,
 }
 
 enum _StudentCardAction { edit, selectMultiple }
@@ -3385,6 +3423,7 @@ class GeminiService {
     String language = 'Sinhala',
     String tone = 'General Follow-up',
     String customInstructions = '',
+    String? companyDescription,
   }) async {
     final cleanKey = sanitizeApiKey(apiKey);
     if (cleanKey.isEmpty) {
@@ -3396,6 +3435,7 @@ class GeminiService {
       language: language,
       tone: tone,
       customInstructions: customInstructions,
+      companyDescription: companyDescription,
     );
 
     String? lastError;
@@ -3778,7 +3818,11 @@ class GeminiService {
     required String language,
     String tone = 'General Follow-up',
     String customInstructions = '',
+    String? companyDescription,
   }) {
+    final instituteInfo = (companyDescription != null && companyDescription.trim().isNotEmpty)
+        ? companyDescription.trim()
+        : _defaultCompanyDescription;
     final streak = studentActivityStatus(student).unansweredStreak;
     final streakNote = streak >= 3
         ? ' ($streak x consecutive unanswered attempts)'
@@ -3797,25 +3841,30 @@ class GeminiService {
         : tone;
 
     return '''
-You are a polite, helpful student coordinator / assistant for an educational institute or tutor in Sri Lanka.
-Write a personalized, concise WhatsApp follow-up message to a student lead with the following context:
+You are a warm, polite, and helpful student coordinator communicating on behalf of:
+$instituteInfo
+
+Write a personalized, concise follow-up message for WhatsApp / SMS to the following student lead:
 
 - Student Name: ${student.name}
 - Stream/Class: ${examDetails.isNotEmpty ? examDetails : 'General Course'}
 - Call Status: ${student.callStatus}$streakNote
 - Recent Call Note/Comment: "$lastNote"
 - Location/Town: ${student.location.isNotEmpty ? student.location : 'Not specified'}
-- What the message should be about: "$goalText"
+- Purpose of message: "$goalText"
 - Desired Language: $language
 
-Rules:
-1. Address the student warmly by name.
-2. If Language is "Sinhala", write in natural, polite conversational Sinhala (සිංහල).
-3. If Language is "Singlish", write in natural conversational Sinhala typed in English letters (Singlish).
-4. If Language is "English", write in clear, polite Sri Lankan English.
-5. Directly address the situation from the call note and the instruction given.
-6. Format nicely for WhatsApp (brief paragraphs, tasteful emojis).
-7. Return ONLY the final message text to be sent directly on WhatsApp. Do not include quotes around the whole text, markdown title/codeblocks, or introductory explanations.
+CRITICAL RULES:
+1. SENDER IDENTITY: You are writing strictly on behalf of LNBTI ($instituteInfo). Maintain this identity naturally.
+2. TONE & MANNER: Friendly, warm, polite, and respectful. Neither overly stiff/robotic nor overly casual/slangy. Balance professional courtesy with genuine warmth.
+3. CONCISENESS (DO NOT OVER-DETAIL): Keep the message concise (2 to 4 sentences). Do NOT dump full syllabuses, long course brochures, or heavy promotional text unless specifically asked in the purpose. Address the student's exact situation directly.
+4. LANGUAGE:
+   - If Language is "Sinhala", write in natural, polite conversational Sinhala (සිංහල).
+   - If Language is "Singlish", write in natural conversational Sinhala typed in English letters (Singlish).
+   - If Language is "English", write in clear, polite Sri Lankan English.
+5. Address the student warmly by name.
+6. Format nicely for WhatsApp / SMS (brief paragraphs, tasteful emojis).
+7. Return ONLY the final message text to be sent directly to the student. Do not include quotes around the whole text, markdown code blocks, or explanations.
 ''';
   }
 }
@@ -4672,6 +4721,76 @@ class _HomeScreenState extends State<HomeScreen> {
       case _SettingsAction.geminiAi:
         await _openGeminiAiSettings();
         break;
+      case _SettingsAction.companyDescription:
+        await _openCompanyDescriptionDialog();
+        break;
+    }
+  }
+
+  Future<void> _openCompanyDescriptionDialog() async {
+    final current = await _settingsStore.readCompanyDescription();
+    if (!mounted) return;
+    final controller = TextEditingController(text: current);
+    final updated = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.business_rounded, color: Color(0xFF8B5CF6)),
+            SizedBox(width: 8),
+            Text('Company Description'),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'AI uses this description to represent your institute (LNBTI) in generated follow-up messages politely without overwhelming details.',
+                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                minLines: 3,
+                maxLines: 6,
+                decoration: InputDecoration(
+                  labelText: 'Description about your company',
+                  hintText: 'Enter institute details...',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.restart_alt_rounded),
+                    tooltip: 'Reset to LNBTI default',
+                    onPressed: () => controller.text = _defaultCompanyDescription,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF8B5CF6),
+            ),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (updated != null && mounted) {
+      await _settingsStore.saveCompanyDescription(updated);
+      if (!mounted) return;
+      _showMessage('Company description saved for AI messaging.');
     }
   }
 
@@ -7800,6 +7919,26 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                         _SettingsAction.geminiAi,
                       ),
                     ),
+                    Divider(
+                      height: 1,
+                      indent: 56,
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                    ListTile(
+                      leading: const Icon(
+                        Icons.business_rounded,
+                        color: Color(0xFF8B5CF6),
+                      ),
+                      title: const Text('Description about your company'),
+                      subtitle: const Text(
+                        'Configure institute details (LNBTI) for AI messaging',
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => Navigator.pop(
+                        context,
+                        _SettingsAction.companyDescription,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -7966,7 +8105,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.14.1',
+                    'LeadPilot v1.15.0',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,
@@ -9059,6 +9198,7 @@ class ManageGeminiAiSheet extends StatefulWidget {
 
 class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
   late final TextEditingController _controller;
+  late final TextEditingController _companyController;
   late final GeminiService _geminiService;
   bool _obscure = true;
   bool _isTesting = false;
@@ -9071,6 +9211,7 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
   void initState() {
     super.initState();
     _controller = TextEditingController();
+    _companyController = TextEditingController();
     _geminiService = widget.geminiService ?? GeminiService();
     _loadKeyAndModel();
   }
@@ -9078,9 +9219,11 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
   Future<void> _loadKeyAndModel() async {
     final key = await widget.settingsStore.readGeminiApiKey();
     final model = await widget.settingsStore.readGeminiModel();
+    final company = await widget.settingsStore.readCompanyDescription();
     if (mounted) {
       setState(() {
         _controller.text = key;
+        _companyController.text = company;
         _selectedModel = model.isNotEmpty ? model : 'gemini-1.5-flash';
       });
       if (key.isNotEmpty) {
@@ -9111,6 +9254,7 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
   @override
   void dispose() {
     _controller.dispose();
+    _companyController.dispose();
     super.dispose();
   }
 
@@ -9119,13 +9263,14 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
     _controller.text = cleanKey;
     await widget.settingsStore.saveGeminiApiKey(cleanKey);
     await widget.settingsStore.saveGeminiModel(_selectedModel);
+    await widget.settingsStore.saveCompanyDescription(_companyController.text.trim());
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           cleanKey.isNotEmpty
-              ? 'Gemini API Key and Model ($_selectedModel) saved successfully!'
-              : 'Gemini settings cleared.',
+              ? 'Gemini API Key, Model ($_selectedModel), and Company Description saved!'
+              : 'Gemini settings saved.',
         ),
       ),
     );
@@ -9425,6 +9570,39 @@ class _ManageGeminiAiSheetState extends State<ManageGeminiAiSheet> {
                   ),
                 ),
               ],
+              const SizedBox(height: 14),
+              TextField(
+                controller: _companyController,
+                minLines: 2,
+                maxLines: 4,
+                decoration: InputDecoration(
+                  labelText: 'Description about your company',
+                  hintText: 'e.g. LNBTI (Lanka Nippon BizTech Institute)...',
+                  border: const OutlineInputBorder(),
+                  prefixIcon: const Padding(
+                    padding: EdgeInsets.only(bottom: 24),
+                    child: Icon(Icons.business_rounded),
+                  ),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.restart_alt_rounded, size: 20),
+                    tooltip: 'Reset to LNBTI default',
+                    onPressed: () {
+                      setState(() {
+                        _companyController.text = _defaultCompanyDescription;
+                      });
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '🏢 AI uses this company description to represent LNBTI politely without overloading the message with excessive details.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontSize: 11,
+                  height: 1.3,
+                ),
+              ),
               if (_testResult != null) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -9521,6 +9699,7 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
   bool _isGenerating = false;
   String? _errorMessage;
   bool _obscureApiKey = true;
+  String _companySummary = '';
 
   final List<String> _languages = const ['Sinhala', 'Singlish', 'English'];
 
@@ -9532,6 +9711,7 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
     _instructionController = TextEditingController();
     _messageController = TextEditingController();
     _geminiService = widget.geminiService ?? GeminiService();
+    _loadCompanyInfo();
 
     final st = widget.student.callStatus.toLowerCase();
     final streak = studentActivityStatus(widget.student).unansweredStreak;
@@ -9551,6 +9731,16 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
         if (mounted) _generateMessage();
       });
     }
+  }
+
+  Future<void> _loadCompanyInfo() async {
+    final company = await widget.settingsStore.readCompanyDescription();
+    if (!mounted) return;
+    setState(() {
+      _companySummary = company.contains('-')
+          ? company.split('-').first.trim()
+          : (company.length > 30 ? '${company.substring(0, 30)}...' : company);
+    });
   }
 
   @override
@@ -9586,12 +9776,14 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
 
     try {
       final savedModel = await widget.settingsStore.readGeminiModel();
+      final companyDesc = await widget.settingsStore.readCompanyDescription();
       final result = await _geminiService.generateFollowUp(
         apiKey: _apiKey,
         student: widget.student,
         model: savedModel,
         language: _selectedLanguage,
         customInstructions: _instructionController.text.trim(),
+        companyDescription: companyDesc,
       );
       if (!mounted) return;
       setState(() {
@@ -9885,6 +10077,27 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
                             ),
                           ),
                         ],
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.business_rounded,
+                              size: 13,
+                              color: Color(0xFF8B5CF6),
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                'On behalf of: ${_companySummary.isNotEmpty ? _companySummary : "LNBTI"}',
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
