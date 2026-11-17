@@ -3467,27 +3467,17 @@ class GeminiService {
     return const [];
   }
 
-  Future<String> generateFollowUp({
+  Future<String> _generateWithPrompt({
     required String apiKey,
-    required Student student,
+    required String prompt,
     String? model,
-    String language = 'Sinhala',
-    String tone = 'General Follow-up',
-    String customInstructions = '',
-    String? companyDescription,
+    double temperature = 0.7,
+    int maxOutputTokens = 500,
   }) async {
     final cleanKey = sanitizeApiKey(apiKey);
     if (cleanKey.isEmpty) {
       throw const GeminiException('Please configure a valid Gemini API Key in Settings.');
     }
-
-    final prompt = _buildPrompt(
-      student: student,
-      language: language,
-      tone: tone,
-      customInstructions: customInstructions,
-      companyDescription: companyDescription,
-    );
 
     String? lastError;
 
@@ -3521,8 +3511,8 @@ class GeminiService {
               }
             ],
             'generationConfig': {
-              'temperature': 0.7,
-              'maxOutputTokens': 500,
+              'temperature': temperature,
+              'maxOutputTokens': maxOutputTokens,
             },
           }),
         ).timeout(const Duration(seconds: 25));
@@ -3625,6 +3615,69 @@ class GeminiService {
       lastError != null && lastError.isNotEmpty
           ? lastError
           : 'Could not connect to Gemini service. Please check your API key.',
+    );
+  }
+
+  Future<String> generateFollowUp({
+    required String apiKey,
+    required Student student,
+    String? model,
+    String language = 'Sinhala',
+    String tone = 'General Follow-up',
+    String customInstructions = '',
+    String? companyDescription,
+  }) async {
+    final prompt = _buildPrompt(
+      student: student,
+      language: language,
+      tone: tone,
+      customInstructions: customInstructions,
+      companyDescription: companyDescription,
+    );
+
+    return _generateWithPrompt(
+      apiKey: apiKey,
+      prompt: prompt,
+      model: model,
+      temperature: 0.7,
+      maxOutputTokens: 500,
+    );
+  }
+
+  Future<String> polishRemark({
+    required String apiKey,
+    required String rawRemark,
+    String? model,
+  }) async {
+    final cleanRemark = rawRemark.trim();
+    if (cleanRemark.isEmpty) {
+      return '';
+    }
+
+    final prompt = '''
+You are an expert CRM assistant for an educational institute (LNBTI).
+A call agent wrote a rough or broken call remark about a student lead.
+The agent's input may be in broken English, shorthand notes, or Singlish/Sinhala.
+
+Raw remark from agent:
+"$cleanRemark"
+
+TASK:
+Rewrite and polish this raw remark into a concise, professional CRM call remark in proper English.
+
+CRITICAL RULES:
+1. FACTUAL ACCURACY: Keep the exact meaning, dates, times, next steps, degree interests, and student situation intact. Do NOT invent new facts.
+2. GRAMMAR & CLARITY: Correct all grammatical, spelling, capitalization, and phrasing issues.
+3. CONCISENESS: Keep it brief and objective (1 to 2 clear sentences max).
+4. OUTPUT FORMAT: Return ONLY the polished English remark text. Do not include quotes around the whole text, prefixes like "Polished Remark:", markdown code blocks, or explanations.
+''';
+
+    return _generateWithPrompt(
+      apiKey: apiKey,
+      prompt: prompt,
+      model: model,
+      temperature: 0.3,
+      maxOutputTokens: 200,
     );
   }
 
@@ -4570,7 +4623,10 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _EditStudentSheet(student: student),
+      builder: (_) => _EditStudentSheet(
+        student: student,
+        settingsStore: _settingsStore,
+      ),
     );
     if (updatedStudent == null || !mounted) return;
 
@@ -6736,9 +6792,16 @@ class _EmptySearchState extends StatelessWidget {
 }
 
 class EditStudentSheet extends StatefulWidget {
-  const EditStudentSheet({super.key, required this.student});
+  const EditStudentSheet({
+    super.key,
+    required this.student,
+    this.settingsStore,
+    this.geminiService,
+  });
 
   final Student student;
+  final AppSettingsStore? settingsStore;
+  final GeminiService? geminiService;
 
   @override
   State<EditStudentSheet> createState() => _EditStudentSheetState();
@@ -6748,6 +6811,12 @@ typedef _EditStudentSheet = EditStudentSheet;
 
 class _EditStudentSheetState extends State<EditStudentSheet> {
   final _formKey = GlobalKey<FormState>();
+  late final AppSettingsStore _settingsStore =
+      widget.settingsStore ?? SecureAppSettingsStore();
+  late final GeminiService _geminiService =
+      widget.geminiService ?? GeminiService();
+  bool _isPolishing = false;
+
   late final _nameController = TextEditingController(text: widget.student.name);
   late final _phoneController = TextEditingController(
     text: widget.student.phone,
@@ -6978,6 +7047,107 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
     widget.student,
     title: 'Call attempt history',
   );
+
+  Future<void> _polishRemarkWithAi() async {
+    final rawRemark = _commentController.text.trim();
+    if (rawRemark.isEmpty) {
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger?.removeCurrentSnackBar();
+      messenger?.showSnackBar(
+        const SnackBar(
+          content: Text('Please type your raw or draft remark first.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    final apiKey = await _settingsStore.readGeminiApiKey();
+    if (apiKey.trim().isEmpty) {
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger?.removeCurrentSnackBar();
+      messenger?.showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Gemini API key not configured. Please add your free key in Settings.',
+          ),
+          action: SnackBarAction(
+            label: 'Settings',
+            onPressed: () {
+              showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.transparent,
+                builder: (_) => ManageGeminiAiSheet(
+                  settingsStore: _settingsStore,
+                  geminiService: _geminiService,
+                ),
+              );
+            },
+          ),
+          duration: const Duration(seconds: 5),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isPolishing = true);
+    final originalText = _commentController.text;
+
+    try {
+      final model = await _settingsStore.readGeminiModel();
+      final polished = await _geminiService.polishRemark(
+        apiKey: apiKey,
+        rawRemark: rawRemark,
+        model: model,
+      );
+
+      if (!mounted) return;
+      if (polished.isNotEmpty) {
+        setState(() {
+          _commentController.text = polished;
+          _commentController.selection = TextSelection.fromPosition(
+            TextPosition(offset: polished.length),
+          );
+        });
+
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        messenger?.removeCurrentSnackBar();
+        messenger?.showSnackBar(
+          SnackBar(
+            content: const Text('✨ Remark polished into clear English!'),
+            action: SnackBarAction(
+              label: 'Undo',
+              onPressed: () {
+                setState(() {
+                  _commentController.text = originalText;
+                  _commentController.selection = TextSelection.fromPosition(
+                    TextPosition(offset: originalText.length),
+                  );
+                });
+              },
+            ),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger?.removeCurrentSnackBar();
+      messenger?.showSnackBar(
+        SnackBar(
+          content: Text('Could not polish remark: $e'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isPolishing = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -7322,6 +7492,56 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
                       child: Icon(Icons.notes_outlined),
                     ),
                   ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Draft in Sinhala, Singlish, or rough English',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant
+                              .withValues(alpha: 0.7),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      key: const Key('polish_remark_button'),
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        foregroundColor: const Color(0xFF8B5CF6),
+                        side: BorderSide(
+                          color: const Color(0xFF8B5CF6).withValues(alpha: 0.6),
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                      onPressed: _isPolishing ? null : _polishRemarkWithAi,
+                      icon: _isPolishing
+                          ? const SizedBox(
+                              width: 13,
+                              height: 13,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.auto_awesome_rounded, size: 14),
+                      label: Text(
+                        _isPolishing ? 'Polishing...' : '✨ Polish English (AI)',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 20),
                 SizedBox(
@@ -8276,7 +8496,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.15.2',
+                    'LeadPilot v1.16.0',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,

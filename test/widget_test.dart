@@ -2258,7 +2258,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.15.2'), findsOneWidget);
+    expect(find.text('LeadPilot v1.16.0'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -3026,5 +3026,138 @@ void main() {
     expect(updatedResult, isNotNull);
     // nextCallDateTime must be empty string so past reminder is not preserved
     expect(updatedResult!.nextCallDateTime, isEmpty);
+  });
+
+  test('GeminiService.polishRemark rewrites broken or rough remarks into clear CRM English', () async {
+    String? capturedPrompt;
+    final mockClient = MockClient((request) async {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      final contents = body['contents'] as List;
+      final parts = contents.first['parts'] as List;
+      capturedPrompt = parts.first['text'] as String;
+
+      return http.Response(
+        jsonEncode({
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {
+                    'text':
+                        'Student did not answer; requested a follow-up call tomorrow at 4:00 PM.',
+                  }
+                ]
+              }
+            }
+          ]
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
+    final service = GeminiService(client: mockClient);
+    final polished = await service.polishRemark(
+      apiKey: 'test_key',
+      rawRemark: 'ans kale na he told to call tomorrow 4pm',
+    );
+
+    expect(
+      polished,
+      'Student did not answer; requested a follow-up call tomorrow at 4:00 PM.',
+    );
+    expect(capturedPrompt, contains('ans kale na he told to call tomorrow 4pm'));
+    expect(capturedPrompt, contains('Rewrite and polish this raw remark'));
+  });
+
+  testWidgets('EditStudentSheet allows polishing raw remarks with AI and supports Undo', (tester) async {
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    final store = MemoryAppSettingsStore();
+    await store.saveGeminiApiKey('test_key');
+
+    final mockClient = MockClient((request) async {
+      return http.Response(
+        jsonEncode({
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {
+                    'text':
+                        'Interested in Software Engineering; requested evening callback.',
+                  }
+                ]
+              }
+            }
+          ]
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
+    final service = GeminiService(client: mockClient);
+    const student = Student(
+      name: 'Nimal Perera',
+      phone: '0712233445',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: EditStudentSheet(
+              student: student,
+              settingsStore: store,
+              geminiService: service,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final polishBtn = find.byKey(const Key('polish_remark_button'));
+    await tester.ensureVisible(polishBtn);
+
+    // 1. Tapping when empty shows a notice
+    await tester.tap(polishBtn);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Please type your raw or draft remark first.'), findsOneWidget);
+
+    // 2. Enter rough remark
+    final remarkField = find.widgetWithText(TextFormField, 'Call remark (optional)');
+    await tester.enterText(remarkField, 'student kata kala se degree kamathi kiwwa hawasa call ganna');
+    await tester.pump();
+
+    // 3. Tap Polish English (AI)
+    await tester.ensureVisible(polishBtn);
+    await tester.tap(polishBtn);
+    await tester.pump(); // starts loading
+    await tester.pump(); // completes Future
+    await tester.pump(); // setState with polished text & calls showSnackBar
+    await tester.pump(); // starts SnackBar entry animation
+    await tester.pump(const Duration(milliseconds: 350)); // finishes slide-in animation
+
+    // Field should now have polished English
+    expect(find.text('Interested in Software Engineering; requested evening callback.'), findsOneWidget);
+    expect(find.text('✨ Remark polished into clear English!'), findsOneWidget);
+
+    // 4. Tap Undo on SnackBar
+    final undoFinder = find.byType(SnackBarAction);
+    expect(undoFinder, findsOneWidget);
+    expect(find.text('Undo'), findsOneWidget);
+    tester.widget<SnackBarAction>(undoFinder).onPressed.call();
+    await tester.pump();
+
+    // Reverted back to raw text
+    expect(find.text('student kata kala se degree kamathi kiwwa hawasa call ganna'), findsOneWidget);
   });
 }
