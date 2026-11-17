@@ -3946,7 +3946,7 @@ CRITICAL RULES:
 
     return '''
 You are writing a WhatsApp / SMS follow-up message to a student lead on behalf of LNBTI ($instituteInfo).
-Act like a friendly, supportive mentor or helpful campus friend (yaluwo wage, api me katha karanawa wage).
+Act as a warm, approachable, and respectful student advisor / counselor from LNBTI.
 
 Target Student Details:
 - Student Name: ${student.name}
@@ -3957,24 +3957,26 @@ Target Student Details:
 - Purpose of message: "$goalText"
 - Desired Language: $language
 
-CRITICAL GUIDELINES (FRIENDLY & CONVERSATIONAL):
-1. TONE & STYLE (YALUWO WAGE / TALK LIKE FRIENDS):
-   - Write like a caring friend or friendly campus mentor having a warm 1-on-1 chat on WhatsApp ("api me katha karanawa wage, yaluwo wage").
-   - DO NOT BE STIFF, ROBOTIC, OR OVERLY FORMAL / CORPORATE.
-   - STRICTLY FORBIDDEN: Do NOT use bureaucratic honorifics or stiff corporate phrases like "ගරු ශිෂ්‍යතුමනි/ශිෂ්‍යාවනි", "මහතාණෙනි", "අප ආයතනය මඟින් දන්වා සිටින්නේ", "Dear Sir/Madam", or "Respected Student".
-   - Start with a natural, friendly greeting using their name (e.g., "හායි ${student.name}!", "කොහොමද ${student.name}?", "Hi ${student.name}! 👋").
+CRITICAL GUIDELINES:
+1. TONE & MANNER (POLITE, RESPECTFUL & APPROACHABLE):
+   - Maintain a warm, friendly, and respectful student counseling tone.
+   - Balance natural conversational warmth with polite respect. Do NOT be overly stiff/robotic, and do NOT be overly casual/slangy.
+   - STRICTLY FORBIDDEN PHRASES:
+     * NO archaic or stiff corporate speech (e.g. "ගරු ශිෂ්‍යතුමනි/ශිෂ්‍යාවනි", "මහතාණෙනි", "අප ආයතනය මඟින් දන්වා සිටින්නේ", "Dear Sir/Madam", "Respected Student").
+     * NO overly casual buddy slang (strictly FORBIDDEN: "හොඳේ", "hode", "honde", "මචං", "machan", "හරිද", "harida", "onna"). Messages are sent to prospective students and must maintain courteous respect.
+   - Start with a natural, polite greeting using their name (e.g., "හායි ${student.name}!", "කොහොමද ${student.name}?", "Hi ${student.name}! 👋").
 
 2. SENDER IDENTITY (LNBTI):
-   - Naturally mention LNBTI as a friend would refer to their campus/team (e.g. "මම LNBTI එකෙන් කතා කරේ / මැසේජ් එකක් දැම්මේ", "LNBTI campus එකෙන්", "just checking in from LNBTI").
+   - Naturally mention LNBTI as an advisor would refer to their campus/team (e.g. "මම LNBTI එකෙන් කතා කරේ / මැසේජ් එකක් දැම්මේ", "LNBTI campus එකෙන්", "just checking in from LNBTI").
 
 3. CONCISENESS (DO NOT OVER-DETAIL):
    - Keep it short, genuine, and light (2 to 3 sentences max).
-   - Do NOT dump long course descriptions or heavy marketing text. Get straight to the friendly point and leave room for them to reply easily.
+   - Do NOT dump long course descriptions or heavy marketing text. Get straight to the point politely and leave room for them to reply easily.
 
 4. LANGUAGE & PHRASING:
-   - If Language is "Sinhala": Use natural colloquial spoken Sinhala that people actually text to each other (e.g. "පුළුවන් වෙලාවක කියන්නකෝ", "විස්තර ඕන නම් අහන්න හොඳේ", "කෝල් එකක් ගන්න බැරි වුණා නේද").
-   - If Language is "Singlish": Use natural conversational Singlish (e.g. "Hi ${student.name}! kohomada? Mama LNBTI eken message kale. Puluwan welawaka kiyannako hode 👍").
-   - If Language is "English": Use warm, friendly conversational English (e.g. "Hey ${student.name}! Hope you're doing well. Just checking in from LNBTI... Let me know when you're free! 😊").
+   - If Language is "Sinhala": Use natural, polite conversational Sinhala (e.g. "පුළුවන් වෙලාවක මැසේජ් එකක් දාන්න හෝ කතා කරන්න", "විස්තර දැනගන්න ඕන නම් අහන්න", "කෝල් එකක් ගන්න බැලුවේ සම්බන්ධ කරගන්න බැරි වුණා"). Strictly do NOT use "හොඳේ".
+   - If Language is "Singlish": Use clean, polite conversational Singlish (e.g. "Hi ${student.name}! kohomada? Mama LNBTI eken message kale. Call ekak ganna baluwe connect karaganna bari una. Puluwan welawaka message ekak danna hari call ekak denna 👍"). Strictly do NOT use "hode".
+   - If Language is "English": Use warm, polite conversational English (e.g. "Hi ${student.name}! Hope you are doing well. Just checking in from LNBTI. Tried calling you earlier, but couldn't reach you. Please let me know when you're free! 😊").
 
 5. EMOJIS & FORMATTING:
    - Add 1-2 friendly, tasteful emojis (e.g. 👋, 😊, 👍).
@@ -8496,7 +8498,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.16.0',
+                    'LeadPilot v1.16.1',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,

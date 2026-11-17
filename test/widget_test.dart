@@ -2258,7 +2258,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.16.0'), findsOneWidget);
+    expect(find.text('LeadPilot v1.16.1'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -2844,8 +2844,8 @@ void main() {
 
     expect(msg, 'Hello Kasun from LNBTI!');
     expect(sentPrompt, contains('LNBTI'));
-    expect(sentPrompt, contains('yaluwo wage'));
-    expect(sentPrompt, contains('api me katha karanawa wage'));
+    expect(sentPrompt, contains('STRICTLY FORBIDDEN PHRASES'));
+    expect(sentPrompt, contains('NO overly casual buddy slang'));
     expect(sentPrompt, contains('DO NOT OVER-DETAIL'));
   });
 
