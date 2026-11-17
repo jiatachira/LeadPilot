@@ -2258,7 +2258,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.15.1'), findsOneWidget);
+    expect(find.text('LeadPilot v1.15.2'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -2804,7 +2804,7 @@ void main() {
     expect(await store.readCompanyDescription(), contains('LNBTI'));
   });
 
-  test('GeminiService includes LNBTI company context and balanced tone rules in prompt', () async {
+  test('GeminiService includes LNBTI company context and friendly conversational tone rules in prompt', () async {
     String? sentPrompt;
     final mockClient = MockClient((request) async {
       final body = jsonDecode(request.body) as Map<String, dynamic>;
@@ -2844,7 +2844,8 @@ void main() {
 
     expect(msg, 'Hello Kasun from LNBTI!');
     expect(sentPrompt, contains('LNBTI'));
-    expect(sentPrompt, contains('Neither overly stiff/robotic nor overly casual/slangy'));
+    expect(sentPrompt, contains('yaluwo wage'));
+    expect(sentPrompt, contains('api me katha karanawa wage'));
     expect(sentPrompt, contains('DO NOT OVER-DETAIL'));
   });
 
