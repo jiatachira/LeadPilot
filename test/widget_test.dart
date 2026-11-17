@@ -2258,7 +2258,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.15.0'), findsOneWidget);
+    expect(find.text('LeadPilot v1.15.1'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -2906,5 +2906,124 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('On behalf of: LNBTI'), findsOneWidget);
+  });
+
+  test('tryParseDate parses ISO, AM/PM, and slash date formats correctly', () {
+    expect(tryParseDate('2026-11-17T14:30:00'), DateTime(2026, 11, 17, 14, 30));
+    expect(tryParseDate('2026-11-17 02:30 PM'), DateTime(2026, 11, 17, 14, 30));
+    expect(tryParseDate('2026-11-17 9:15 AM'), DateTime(2026, 11, 17, 9, 15));
+    expect(tryParseDate('17/11/2026 14:30:00'), DateTime(2026, 11, 17, 14, 30));
+    expect(tryParseDate('17/11/2026 02:30 PM'), DateTime(2026, 11, 17, 14, 30));
+    expect(tryParseDate('17/11/2026'), DateTime(2026, 11, 17));
+    expect(tryParseDate(''), isNull);
+    expect(tryParseDate(null), isNull);
+  });
+
+  testWidgets(
+      'Lead with overdue reminder from yesterday displays overdue notice and quick chips in EditStudentSheet',
+      (tester) async {
+    final yesterday = DateTime.now().subtract(const Duration(days: 1));
+    final student = Student(
+      name: 'Nalaka Silva',
+      phone: '0773344556',
+      callStatus: 'Call Back',
+      nextCallDateTime: yesterday.toIso8601String(),
+    );
+
+    Student? updatedResult;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () async {
+                updatedResult = await showModalBottomSheet<Student>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => EditStudentSheet(student: student),
+                );
+              },
+              child: const Text('Open Edit'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Open Edit'));
+    await tester.pumpAndSettle();
+
+    // Verify overdue indication
+    expect(find.textContaining('Overdue:'), findsOneWidget);
+    expect(find.text('+1 hr'), findsOneWidget);
+    expect(find.text('+3 hrs'), findsOneWidget);
+    expect(find.text('Tomorrow 10 AM'), findsOneWidget);
+
+    // Tap +1 hr quick shortcut
+    await tester.ensureVisible(find.text('+1 hr'));
+    await tester.tap(find.text('+1 hr'));
+    await tester.pumpAndSettle();
+
+    // Overdue warning should be replaced by the new scheduled future time
+    expect(find.textContaining('Overdue:'), findsNothing);
+
+    // Save
+    await tester.ensureVisible(find.text('Update Details'));
+    await tester.tap(find.text('Update Details'));
+    await tester.pumpAndSettle();
+
+    expect(updatedResult, isNotNull);
+    final parsedNextCall = tryParseDate(updatedResult!.nextCallDateTime);
+    expect(parsedNextCall, isNotNull);
+    expect(parsedNextCall!.isAfter(DateTime.now()), isTrue);
+  });
+
+  testWidgets(
+      'Saving lead with overdue reminder without setting new future reminder clears nextCallDateTime',
+      (tester) async {
+    final yesterday = DateTime.now().subtract(const Duration(days: 1));
+    final student = Student(
+      name: 'Sunil Shantha',
+      phone: '0715566778',
+      callStatus: 'No Answer',
+      nextCallDateTime: yesterday.toIso8601String(),
+    );
+
+    Student? updatedResult;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () async {
+                updatedResult = await showModalBottomSheet<Student>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => EditStudentSheet(student: student),
+                );
+              },
+              child: const Text('Open Edit'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Open Edit'));
+    await tester.pumpAndSettle();
+
+    // Overdue warning is present
+    expect(find.textContaining('Overdue:'), findsOneWidget);
+
+    // Save directly without picking a new reminder
+    await tester.ensureVisible(find.text('Update Details'));
+    await tester.tap(find.text('Update Details'));
+    await tester.pumpAndSettle();
+
+    expect(updatedResult, isNotNull);
+    // nextCallDateTime must be empty string so past reminder is not preserved
+    expect(updatedResult!.nextCallDateTime, isEmpty);
   });
 }

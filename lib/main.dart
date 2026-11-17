@@ -378,24 +378,75 @@ bool _isConnectedCall(String status) => const {
   'future',
 }.contains(status.trim().toLowerCase());
 
-DateTime? _parseActivityDate(String value) {
-  final parsed = DateTime.tryParse(value);
-  if (parsed != null) return parsed;
-  final match = RegExp(
-    r'^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})\s+(AM|PM)$',
+DateTime? tryParseDate(dynamic value) {
+  if (value == null) return null;
+  final str = value.toString().trim();
+  if (str.isEmpty) return null;
+
+  final direct = DateTime.tryParse(str);
+  if (direct != null) return direct;
+
+  final matchYmdAmPm = RegExp(
+    r'^(\d{4})[-/](\d{1,2})[-/](\d{1,2})[T\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)$',
     caseSensitive: false,
-  ).firstMatch(value);
-  if (match == null) return null;
-  final hour = int.parse(match[4]!);
-  final adjustedHour = hour % 12 + (match[6]!.toUpperCase() == 'PM' ? 12 : 0);
-  return DateTime(
-    int.parse(match[1]!),
-    int.parse(match[2]!),
-    int.parse(match[3]!),
-    adjustedHour,
-    int.parse(match[5]!),
-  );
+  ).firstMatch(str);
+  if (matchYmdAmPm != null) {
+    final year = int.parse(matchYmdAmPm[1]!);
+    final month = int.parse(matchYmdAmPm[2]!);
+    final day = int.parse(matchYmdAmPm[3]!);
+    final rawHour = int.parse(matchYmdAmPm[4]!);
+    final minute = int.parse(matchYmdAmPm[5]!);
+    final second = int.tryParse(matchYmdAmPm[6] ?? '0') ?? 0;
+    final isPm = matchYmdAmPm[7]!.toUpperCase() == 'PM';
+    final hour = (rawHour % 12) + (isPm ? 12 : 0);
+    return DateTime(year, month, day, hour, minute, second);
+  }
+
+  final matchDmy = RegExp(
+    r'^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[T\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$',
+    caseSensitive: false,
+  ).firstMatch(str);
+  if (matchDmy != null) {
+    final day = int.parse(matchDmy[1]!);
+    final month = int.parse(matchDmy[2]!);
+    final year = int.parse(matchDmy[3]!);
+    final rawHour = matchDmy[4] != null ? int.parse(matchDmy[4]!) : 0;
+    final minute = matchDmy[5] != null ? int.parse(matchDmy[5]!) : 0;
+    final second = matchDmy[6] != null ? int.parse(matchDmy[6]!) : 0;
+    final amPm = matchDmy[7]?.toUpperCase();
+    final int hour;
+    if (amPm != null) {
+      hour = (rawHour % 12) + (amPm == 'PM' ? 12 : 0);
+    } else {
+      hour = rawHour;
+    }
+    return DateTime(year, month, day, hour, minute, second);
+  }
+
+  if (RegExp(r'^\d{10,13}$').hasMatch(str)) {
+    final millis = int.tryParse(str);
+    if (millis != null) {
+      return DateTime.fromMillisecondsSinceEpoch(
+        str.length == 10 ? millis * 1000 : millis,
+      );
+    }
+  }
+
+  return null;
 }
+
+DateTime _defaultFutureReminder([DateTime? base]) {
+  final now = base ?? DateTime.now();
+  final target = now.add(const Duration(minutes: 15));
+  final remainder = target.minute % 5;
+  final roundedMinute = remainder == 0 ? target.minute : target.minute + (5 - remainder);
+  if (roundedMinute >= 60) {
+    return DateTime(target.year, target.month, target.day, target.hour + 1, roundedMinute - 60);
+  }
+  return DateTime(target.year, target.month, target.day, target.hour, roundedMinute);
+}
+
+DateTime? _parseActivityDate(String value) => tryParseDate(value);
 
 int allocateReminderNotificationId(String phoneNumber, Set<int> usedIds) {
   final key = normalizeContactPhone(phoneNumber);
@@ -4319,8 +4370,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   int _compareStudentsByFollowUpDate(Student left, Student right) {
-    final leftDate = DateTime.tryParse(left.nextCallDateTime);
-    final rightDate = DateTime.tryParse(right.nextCallDateTime);
+    final leftDate = tryParseDate(left.nextCallDateTime);
+    final rightDate = tryParseDate(right.nextCallDateTime);
     if (leftDate == null || rightDate == null) {
       if (leftDate == null && rightDate != null) return 1;
       if (rightDate == null && leftDate != null) return -1;
@@ -4333,8 +4384,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   int _compareStudentsByNewestDate(Student left, Student right) {
-    final leftDate = DateTime.tryParse(left.addedDate);
-    final rightDate = DateTime.tryParse(right.addedDate);
+    final leftDate = tryParseDate(left.addedDate);
+    final rightDate = tryParseDate(right.addedDate);
     if (leftDate == null || rightDate == null) {
       if (leftDate == null && rightDate != null) return 1;
       if (rightDate == null && leftDate != null) return -1;
@@ -4356,7 +4407,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final from = _dateFrom;
     final to = _dateTo;
     if (from != null || to != null) {
-      final addedDate = DateTime.tryParse(student.addedDate);
+      final addedDate = tryParseDate(student.addedDate);
       if (addedDate == null) return false;
       final day = DateTime(addedDate.year, addedDate.month, addedDate.day);
       if (from != null && day.isBefore(_dateOnly(from))) return false;
@@ -4369,7 +4420,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case _LeadFilter.newLeads:
         return student.callStatus.trim().toLowerCase() == 'pending';
       case _LeadFilter.todayFollowUp:
-        final nextCall = DateTime.tryParse(student.nextCallDateTime);
+        final nextCall = tryParseDate(student.nextCallDateTime);
         final today = DateTime.now();
         if (nextCall == null ||
             !nextCall.isBefore(
@@ -4378,7 +4429,7 @@ class _HomeScreenState extends State<HomeScreen> {
           return false;
         }
         return !student.attempts.any((attempt) {
-          final attemptedAt = DateTime.tryParse(attempt.dateTime);
+          final attemptedAt = tryParseDate(attempt.dateTime);
           return attemptedAt != null && !attemptedAt.isBefore(nextCall);
         });
     }
@@ -4589,9 +4640,9 @@ class _HomeScreenState extends State<HomeScreen> {
     Student updatedStudent,
   ) async {
     try {
-      final previousCall = DateTime.tryParse(previousStudent.nextCallDateTime);
-      final nextCall = DateTime.tryParse(updatedStudent.nextCallDateTime);
-      if (nextCall == null) {
+      final previousCall = tryParseDate(previousStudent.nextCallDateTime);
+      final nextCall = tryParseDate(updatedStudent.nextCallDateTime);
+      if (nextCall == null || !nextCall.isAfter(DateTime.now())) {
         if (previousCall != null) {
           await widget.reminderScheduler.cancelStudentReminder(previousStudent);
         }
@@ -5038,7 +5089,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       for (final student in students) {
         if (isFinalLeadStatus(student.callStatus)) continue;
-        final nextCall = DateTime.tryParse(student.nextCallDateTime);
+        final nextCall = tryParseDate(student.nextCallDateTime);
         if (nextCall == null) continue;
 
         if (!nextCall.isBefore(endOfToday) || !nextCall.isAfter(now)) {
@@ -5046,7 +5097,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
 
         final alreadyAttempted = student.attempts.any((attempt) {
-          final attemptedAt = DateTime.tryParse(attempt.dateTime);
+          final attemptedAt = tryParseDate(attempt.dateTime);
           return attemptedAt != null && !attemptedAt.isBefore(nextCall);
         });
         if (alreadyAttempted) continue;
@@ -6331,16 +6382,18 @@ class StudentCard extends StatelessWidget {
                                 background: activity.color.withValues(alpha: 0.15),
                                 foreground: activity.color,
                               ),
-                            if (DateTime.tryParse(student.nextCallDateTime)
+                            if (tryParseDate(student.nextCallDateTime)
                                 case final reminder?)
                               _StudentTag(
-                                text: 'Call · ${_formatReminder(reminder)}',
-                                background: isDark
-                                    ? const Color(0xFF44351F)
-                                    : const Color(0xFFFFF3DF),
-                                foreground: isDark
-                                    ? const Color(0xFFFFC56E)
-                                    : const Color(0xFF9A5A00),
+                                text: !reminder.isAfter(DateTime.now())
+                                    ? '⚠️ Overdue · ${_formatReminder(reminder)}'
+                                    : 'Call · ${_formatReminder(reminder)}',
+                                background: !reminder.isAfter(DateTime.now())
+                                    ? (isDark ? const Color(0xFF4A2525) : const Color(0xFFFFEBEB))
+                                    : (isDark ? const Color(0xFF44351F) : const Color(0xFFFFF3DF)),
+                                foreground: !reminder.isAfter(DateTime.now())
+                                    ? (isDark ? const Color(0xFFFF8B8B) : const Color(0xFFD32F2F))
+                                    : (isDark ? const Color(0xFFFFC56E) : const Color(0xFF9A5A00)),
                               ),
                             if (student.addedDate.isNotEmpty)
                               Text(
@@ -6672,16 +6725,18 @@ class _EmptySearchState extends StatelessWidget {
   }
 }
 
-class _EditStudentSheet extends StatefulWidget {
-  const _EditStudentSheet({required this.student});
+class EditStudentSheet extends StatefulWidget {
+  const EditStudentSheet({super.key, required this.student});
 
   final Student student;
 
   @override
-  State<_EditStudentSheet> createState() => _EditStudentSheetState();
+  State<EditStudentSheet> createState() => _EditStudentSheetState();
 }
 
-class _EditStudentSheetState extends State<_EditStudentSheet> {
+typedef _EditStudentSheet = EditStudentSheet;
+
+class _EditStudentSheetState extends State<EditStudentSheet> {
   final _formKey = GlobalKey<FormState>();
   late final _nameController = TextEditingController(text: widget.student.name);
   late final _phoneController = TextEditingController(
@@ -6731,7 +6786,7 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
   late bool _sameAsContact =
       widget.student.whatsappSameAsContact ||
       widget.student.whatsappNumber == widget.student.phone;
-  late DateTime? _nextCallDateTime = DateTime.tryParse(
+  late DateTime? _nextCallDateTime = tryParseDate(
     widget.student.nextCallDateTime,
   );
   bool _isPickingNextCallDateTime = false;
@@ -6774,6 +6829,13 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
       ),
     );
 
+    final hasValidFutureReminder = _nextCallDateTime != null &&
+        _nextCallDateTime!.isAfter(DateTime.now());
+    final nextCallStr =
+        (isFinalLeadStatus(callStatus) || !hasValidFutureReminder)
+            ? ''
+            : _nextCallDateTime!.toIso8601String();
+
     return widget.student.copyWith(
       name: name,
       phone: phone,
@@ -6785,12 +6847,35 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
       whatsappNumber: _sameAsContact ? phone : _whatsappController.text.trim(),
       whatsappSameAsContact: _sameAsContact,
       callStatus: callStatus,
-      nextCallDateTime: isFinalLeadStatus(callStatus)
-          ? ''
-          : _nextCallDateTime?.toIso8601String() ?? '',
+      nextCallDateTime: nextCallStr,
       comment: newComment.isEmpty ? null : newComment,
       commentHistory: history,
       attempts: attempts,
+    );
+  }
+
+  void _setQuickReminder(Duration offset, [int? targetHour]) {
+    final now = DateTime.now();
+    DateTime target;
+    if (targetHour != null) {
+      final tomorrow = now.add(const Duration(days: 1));
+      target = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, targetHour, 0);
+    } else {
+      target = now.add(offset);
+      final remainder = target.minute % 5;
+      final roundedMinute = remainder == 0 ? target.minute : target.minute + (5 - remainder);
+      if (roundedMinute >= 60) {
+        target = DateTime(target.year, target.month, target.day, target.hour + 1, roundedMinute - 60);
+      } else {
+        target = DateTime(target.year, target.month, target.day, target.hour, roundedMinute);
+      }
+    }
+    setState(() => _nextCallDateTime = target);
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(
+        content: Text('Next call scheduled: ${_formatReminder(target)}'),
+        duration: const Duration(seconds: 2),
+      ),
     );
   }
 
@@ -6800,17 +6885,29 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
 
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final defaultReminder = now.add(const Duration(minutes: 1));
     final existingReminder = _nextCallDateTime;
-    final pickerInitialDateTime =
-        existingReminder != null && existingReminder.isAfter(now)
-        ? existingReminder
-        : defaultReminder;
-    final preferredDate = existingReminder ?? pickerInitialDateTime;
+    final isExistingFuture = existingReminder != null && existingReminder.isAfter(now);
+
+    final initialPickerDate = isExistingFuture
+        ? DateTime(existingReminder.year, existingReminder.month, existingReminder.day)
+        : today;
+
+    TimeOfDay initialPickerTime;
+    if (isExistingFuture) {
+      initialPickerTime = TimeOfDay.fromDateTime(existingReminder);
+    } else if (existingReminder != null &&
+        combineReminderDateAndTime(today, TimeOfDay.fromDateTime(existingReminder))
+            .isAfter(now.add(const Duration(minutes: 5)))) {
+      initialPickerTime = TimeOfDay.fromDateTime(existingReminder);
+    } else {
+      final safeDefault = _defaultFutureReminder(now);
+      initialPickerTime = TimeOfDay.fromDateTime(safeDefault);
+    }
+
     try {
       final selectedDate = await showDatePicker(
         context: context,
-        initialDate: preferredDate.isBefore(today) ? today : preferredDate,
+        initialDate: initialPickerDate.isBefore(today) ? today : initialPickerDate,
         firstDate: today,
         lastDate: DateTime(now.year + 10),
         helpText: 'Select next call date',
@@ -6819,25 +6916,37 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
 
       final selectedTime = await showTimePicker(
         context: context,
-        initialTime: TimeOfDay.fromDateTime(pickerInitialDateTime),
+        initialTime: initialPickerTime,
         helpText: 'Select next call time',
       );
       if (!mounted || selectedTime == null) return;
 
-      final selectedDateTime = combineReminderDateAndTime(
+      var selectedDateTime = combineReminderDateAndTime(
         selectedDate,
         selectedTime,
       );
-      if (!isReminderDateTimeInFuture(selectedDateTime, now: DateTime.now())) {
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          const SnackBar(
-            content: Text(
-              'That time has already passed today. Choose a later time.',
+
+      final currentNow = DateTime.now();
+      final isSelectedDateToday = selectedDate.year == currentNow.year &&
+          selectedDate.month == currentNow.month &&
+          selectedDate.day == currentNow.day;
+
+      if (isSelectedDateToday) {
+        if (selectedDateTime.isBefore(currentNow) &&
+            selectedDateTime.isAfter(currentNow.subtract(const Duration(minutes: 2)))) {
+          selectedDateTime = currentNow.add(const Duration(minutes: 2));
+        } else if (selectedDateTime.isBefore(currentNow)) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            const SnackBar(
+              content: Text(
+                'That time has already passed today. Choose a later time.',
+              ),
             ),
-          ),
-        );
-        return;
+          );
+          return;
+        }
       }
+
       setState(() => _nextCallDateTime = selectedDateTime);
     } catch (error) {
       if (mounted) {
@@ -7075,7 +7184,12 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
                   icon: Icon(
                     _isPickingNextCallDateTime
                         ? Icons.hourglass_top_rounded
-                        : Icons.event_available_outlined,
+                        : (_nextCallDateTime != null && _nextCallDateTime!.isBefore(DateTime.now())
+                            ? Icons.warning_amber_rounded
+                            : Icons.event_available_outlined),
+                    color: _nextCallDateTime != null && _nextCallDateTime!.isBefore(DateTime.now())
+                        ? const Color(0xFFD32F2F)
+                        : null,
                   ),
                   label: Align(
                     alignment: Alignment.centerLeft,
@@ -7084,7 +7198,9 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
                           ? 'Selecting date & time…'
                           : _nextCallDateTime == null
                           ? 'Next call date & time (optional)'
-                          : 'Next call · ${_formatReminder(_nextCallDateTime!)}',
+                          : (_nextCallDateTime!.isBefore(DateTime.now())
+                              ? 'Next call · Overdue: ${_formatReminder(_nextCallDateTime!)} (Tap to reschedule)'
+                              : 'Next call · ${_formatReminder(_nextCallDateTime!)}'),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -7094,21 +7210,66 @@ class _EditStudentSheetState extends State<_EditStudentSheet> {
                     foregroundColor: Theme.of(context).colorScheme.onSurface,
                     minimumSize: const Size.fromHeight(54),
                     side: BorderSide(
-                      color: Theme.of(context).colorScheme.outlineVariant,
+                      color: _nextCallDateTime != null && _nextCallDateTime!.isBefore(DateTime.now())
+                          ? const Color(0xFFD32F2F)
+                          : Theme.of(context).colorScheme.outlineVariant,
                     ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
                 ),
+                const SizedBox(height: 6),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      ActionChip(
+                        avatar: const Icon(Icons.add_alarm_rounded, size: 15),
+                        label: const Text('+1 hr'),
+                        onPressed: () => _setQuickReminder(const Duration(hours: 1)),
+                      ),
+                      const SizedBox(width: 8),
+                      ActionChip(
+                        avatar: const Icon(Icons.add_alarm_rounded, size: 15),
+                        label: const Text('+3 hrs'),
+                        onPressed: () => _setQuickReminder(const Duration(hours: 3)),
+                      ),
+                      const SizedBox(width: 8),
+                      ActionChip(
+                        avatar: const Icon(Icons.wb_sunny_outlined, size: 15),
+                        label: const Text('Tomorrow 10 AM'),
+                        onPressed: () => _setQuickReminder(const Duration(days: 1), 10),
+                      ),
+                      const SizedBox(width: 8),
+                      ActionChip(
+                        avatar: const Icon(Icons.brightness_5_rounded, size: 15),
+                        label: const Text('Tomorrow 2 PM'),
+                        onPressed: () => _setQuickReminder(const Duration(days: 1), 14),
+                      ),
+                    ],
+                  ),
+                ),
                 if (_nextCallDateTime == null)
                   Padding(
-                    padding: EdgeInsets.only(left: 4, top: 6),
+                    padding: const EdgeInsets.only(left: 4, top: 6),
                     child: Text(
                       'Optional — leave blank to save without a call reminder.',
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontSize: 12,
+                      ),
+                    ),
+                  ),
+                if (_nextCallDateTime != null && _nextCallDateTime!.isBefore(DateTime.now()))
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, top: 4),
+                    child: Text(
+                      '⚠️ This reminder was for the past. Tap above to reschedule, or save to clear.',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
@@ -8105,7 +8266,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.15.0',
+                    'LeadPilot v1.15.1',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,
