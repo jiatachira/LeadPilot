@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 class MainActivity : FlutterFragmentActivity() {
     private val ringtoneChannelName = "com.example.call_dial/ringtone"
@@ -154,6 +155,86 @@ class MainActivity : FlutterFragmentActivity() {
                         CallerIdActivity.dismissCurrent()
                         CallerIdOverlayManager.dismiss(applicationContext)
                         result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // App Installer Channel
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.example.call_dial/installer")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getApkDownloadPath" -> {
+                        try {
+                            val dir = File(cacheDir, "updates")
+                            if (!dir.exists()) dir.mkdirs()
+                            val file = File(dir, "LeadPilot-update.apk")
+                            result.success(file.absolutePath)
+                        } catch (e: Exception) {
+                            result.error("PATH_ERROR", e.message, null)
+                        }
+                    }
+                    "canRequestPackageInstalls" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            result.success(packageManager.canRequestPackageInstalls())
+                        } else {
+                            result.success(true)
+                        }
+                    }
+                    "openInstallPermissionSettings" -> {
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                    data = Uri.parse("package:$packageName")
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(intent)
+                                result.success(true)
+                            } else {
+                                result.success(true)
+                            }
+                        } catch (e: Exception) {
+                            result.error("SETTINGS_ERROR", e.message, null)
+                        }
+                    }
+                    "installApk" -> {
+                        try {
+                            val filePath = call.argument<String>("filePath")
+                            if (filePath.isNullOrEmpty()) {
+                                result.error("INVALID_PATH", "APK path is empty", null)
+                                return@setMethodCallHandler
+                            }
+                            val file = File(filePath)
+                            if (!file.exists()) {
+                                result.error("FILE_NOT_FOUND", "APK file does not exist", null)
+                                return@setMethodCallHandler
+                            }
+
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+                                val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                    data = Uri.parse("package:$packageName")
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(intent)
+                                result.error("PERMISSION_REQUIRED", "Please allow LeadPilot to install unknown apps.", null)
+                                return@setMethodCallHandler
+                            }
+
+                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                applicationContext,
+                                "$packageName.fileprovider",
+                                file
+                            )
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(uri, "application/vnd.android.package-archive")
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("INSTALL_ERROR", e.message, null)
+                        }
                     }
                     else -> result.notImplemented()
                 }

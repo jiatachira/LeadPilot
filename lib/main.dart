@@ -20,7 +20,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.17.1';
+const String kAppVersion = '1.17.2';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -4482,24 +4482,421 @@ class AppUpdateService {
   }
 }
 
-Future<void> showAppUpdateDialog(
-  BuildContext context,
-  AppUpdateInfo updateInfo, {
-  Future<void> Function(String url)? onLaunchUrl,
-}) async {
-  final theme = Theme.of(context);
-  final isDark = theme.brightness == Brightness.dark;
-  final launch = onLaunchUrl ??
-      (url) async {
-        final uri = Uri.parse(url);
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        }
-      };
+class AppInstallerService {
+  static const _channel = MethodChannel('com.example.call_dial/installer');
 
-  await showDialog<void>(
-    context: context,
-    builder: (ctx) => AlertDialog(
+  static Future<String> getApkDownloadPath() async {
+    if (Platform.isAndroid) {
+      try {
+        final path = await _channel.invokeMethod<String>('getApkDownloadPath');
+        if (path != null && path.isNotEmpty) return path;
+      } catch (e) {
+        debugPrint('Error getting apk download path: $e');
+      }
+    }
+    final tempDir = Directory.systemTemp;
+    return '${tempDir.path}/LeadPilot-update.apk';
+  }
+
+  static Future<bool> canRequestPackageInstalls() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      final allowed =
+          await _channel.invokeMethod<bool>('canRequestPackageInstalls');
+      return allowed ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<void> openInstallPermissionSettings() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod<void>('openInstallPermissionSettings');
+    } catch (_) {}
+  }
+
+  static Future<bool> installApk(String filePath) async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final result = await _channel
+          .invokeMethod<bool>('installApk', {'filePath': filePath});
+      return result ?? true;
+    } catch (e) {
+      debugPrint('Install APK error: $e');
+      rethrow;
+    }
+  }
+}
+
+Stream<({int receivedBytes, int totalBytes, double progress})>
+    downloadApkWithProgress({
+  required String url,
+  required String destinationPath,
+  http.Client? client,
+}) async* {
+  final httpClient = client ?? http.Client();
+  final request = http.Request('GET', Uri.parse(url));
+  request.headers['User-Agent'] = 'LeadPilot-App';
+  final response = await httpClient.send(request);
+
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw Exception('Failed to download APK (HTTP ${response.statusCode})');
+  }
+
+  final totalBytes = response.contentLength ?? 0;
+  var receivedBytes = 0;
+  final file = File(destinationPath);
+  if (file.existsSync()) {
+    try {
+      file.deleteSync();
+    } catch (_) {}
+  }
+  file.createSync(recursive: true);
+  final raf = file.openSync(mode: FileMode.write);
+
+  try {
+    await for (final chunk in response.stream) {
+      raf.writeFromSync(chunk);
+      receivedBytes += chunk.length;
+      final progress = totalBytes > 0 ? (receivedBytes / totalBytes) : 0.0;
+      yield (
+        receivedBytes: receivedBytes,
+        totalBytes: totalBytes,
+        progress: progress,
+      );
+    }
+  } finally {
+    try {
+      raf.closeSync();
+    } catch (_) {}
+    if (client == null) {
+      httpClient.close();
+    }
+  }
+}
+
+class AppUpdateDialog extends StatefulWidget {
+  const AppUpdateDialog({
+    super.key,
+    required this.updateInfo,
+    this.onLaunchUrl,
+    this.onInstallApk,
+    this.httpClient,
+  });
+
+  final AppUpdateInfo updateInfo;
+  final Future<void> Function(String url)? onLaunchUrl;
+  final Future<void> Function(String filePath)? onInstallApk;
+  final http.Client? httpClient;
+
+  @override
+  State<AppUpdateDialog> createState() => _AppUpdateDialogState();
+}
+
+class _AppUpdateDialogState extends State<AppUpdateDialog> {
+  bool _isDownloading = false;
+  bool _isDownloaded = false;
+  double _progress = 0.0;
+  int _receivedBytes = 0;
+  int _totalBytes = 0;
+  String? _downloadError;
+  String _savedApkPath = '';
+  StreamSubscription<dynamic>? _downloadSub;
+  bool _needsInstallPermission = false;
+
+  @override
+  void dispose() {
+    _downloadSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _startDownload() async {
+    final downloadUrl = widget.updateInfo.downloadUrl;
+    if (!downloadUrl.toLowerCase().endsWith('.apk')) {
+      await _openUrl(downloadUrl);
+      if (mounted) Navigator.pop(context);
+      return;
+    }
+
+    setState(() {
+      _isDownloading = true;
+      _downloadError = null;
+      _progress = 0.0;
+      _receivedBytes = 0;
+      _totalBytes = widget.updateInfo.apkSize;
+    });
+
+    try {
+      final destPath = await AppInstallerService.getApkDownloadPath();
+      _savedApkPath = destPath;
+
+      final stream = downloadApkWithProgress(
+        url: downloadUrl,
+        destinationPath: destPath,
+        client: widget.httpClient,
+      );
+
+      _downloadSub = stream.listen(
+        (data) {
+          if (!mounted) return;
+          setState(() {
+            _receivedBytes = data.receivedBytes;
+            _totalBytes = data.totalBytes > 0
+                ? data.totalBytes
+                : widget.updateInfo.apkSize;
+            _progress = data.progress.clamp(0.0, 1.0);
+          });
+        },
+        onError: (err) {
+          if (!mounted) return;
+          setState(() {
+            _isDownloading = false;
+            _downloadError = err.toString();
+          });
+        },
+        onDone: () async {
+          if (!mounted) return;
+          setState(() {
+            _isDownloading = false;
+            _isDownloaded = true;
+            _progress = 1.0;
+          });
+          await _triggerInstall();
+        },
+        cancelOnError: true,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isDownloading = false;
+        _downloadError = e.toString();
+      });
+    }
+  }
+
+  Future<void> _triggerInstall() async {
+    if (_savedApkPath.isEmpty) return;
+
+    if (widget.onInstallApk != null) {
+      await widget.onInstallApk!(_savedApkPath);
+      return;
+    }
+
+    try {
+      final canInstall = await AppInstallerService.canRequestPackageInstalls();
+      if (!canInstall) {
+        if (mounted) setState(() => _needsInstallPermission = true);
+        await AppInstallerService.openInstallPermissionSettings();
+        return;
+      }
+      await AppInstallerService.installApk(_savedApkPath);
+    } catch (e) {
+      final errorStr = e.toString();
+      if (errorStr.contains('PERMISSION_REQUIRED')) {
+        if (mounted) setState(() => _needsInstallPermission = true);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            SnackBar(content: Text('Installation prompt failed: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _openUrl(String url) async {
+    if (widget.onLaunchUrl != null) {
+      await widget.onLaunchUrl!(url);
+      return;
+    }
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    // 1. Download in progress view
+    if (_isDownloading) {
+      return AlertDialog(
+        key: const Key('app_update_dialog'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Row(
+          children: [
+            SizedBox(
+              width: 26,
+              height: 26,
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                value: _progress.clamp(0.01, 1.0),
+                color: const Color(0xFF00966D),
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Downloading Update...',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Downloading LeadPilot v${widget.updateInfo.latestVersion}',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 14),
+            LinearProgressIndicator(
+              value: _progress.clamp(0.0, 1.0),
+              minHeight: 8,
+              borderRadius: BorderRadius.circular(4),
+              backgroundColor:
+                  isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+              color: const Color(0xFF00966D),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '${(_progress * 100).toStringAsFixed(0)}%',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF00966D),
+                  ),
+                ),
+                Text(
+                  _totalBytes > 0
+                      ? '${(_receivedBytes / (1024 * 1024)).toStringAsFixed(1)} / ${(_totalBytes / (1024 * 1024)).toStringAsFixed(1)} MB'
+                      : '${(_receivedBytes / (1024 * 1024)).toStringAsFixed(1)} MB',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              _downloadSub?.cancel();
+              setState(() => _isDownloading = false);
+            },
+            child: const Text('Cancel Download'),
+          ),
+        ],
+      );
+    }
+
+    // 2. Download complete / ready to install view
+    if (_isDownloaded) {
+      return AlertDialog(
+        key: const Key('app_update_dialog'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00966D).withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.check_circle_rounded,
+                color: Color(0xFF00966D),
+                size: 26,
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Update Ready!',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'LeadPilot v${widget.updateInfo.latestVersion} has finished downloading. Launching package installer to apply update...',
+              style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
+            ),
+            if (_needsInstallPermission) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF3CD),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFFFD56B)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.security_rounded,
+                      color: Color(0xFF996500),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Android permission required: Please allow "Install unknown apps" for LeadPilot, then tap Install Now.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF664400),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          if (_needsInstallPermission)
+            TextButton.icon(
+              icon: const Icon(Icons.settings_outlined, size: 16),
+              label: const Text('Allow in Settings'),
+              onPressed: () =>
+                  AppInstallerService.openInstallPermissionSettings(),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Dismiss'),
+          ),
+          FilledButton.icon(
+            key: const Key('install_now_button'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF00966D),
+              foregroundColor: Colors.white,
+            ),
+            icon: const Icon(Icons.system_update_rounded, size: 18),
+            label: const Text('Install Now'),
+            onPressed: _triggerInstall,
+          ),
+        ],
+      );
+    }
+
+    // 3. Initial dialog view with release notes & download size
+    return AlertDialog(
       key: const Key('app_update_dialog'),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       title: Row(
@@ -4544,7 +4941,7 @@ Future<void> showAppUpdateDialog(
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    'v${updateInfo.currentVersion}',
+                    'v${widget.updateInfo.currentVersion}',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -4566,7 +4963,7 @@ Future<void> showAppUpdateDialog(
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    'v${updateInfo.latestVersion}',
+                    'v${widget.updateInfo.latestVersion}',
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
@@ -4576,16 +4973,26 @@ Future<void> showAppUpdateDialog(
                 ),
               ],
             ),
-            if (updateInfo.apkSize > 0) ...[
+            if (widget.updateInfo.apkSize > 0) ...[
               const SizedBox(height: 10),
               Text(
-                'Download size: ${(updateInfo.apkSize / (1024 * 1024)).toStringAsFixed(1)} MB',
+                'Download size: ${(widget.updateInfo.apkSize / (1024 * 1024)).toStringAsFixed(1)} MB',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
             ],
-            if (updateInfo.releaseNotes.trim().isNotEmpty) ...[
+            if (_downloadError != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Download failed: $_downloadError',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+            if (widget.updateInfo.releaseNotes.trim().isNotEmpty) ...[
               const SizedBox(height: 14),
               Text(
                 "What's New:",
@@ -4611,7 +5018,7 @@ Future<void> showAppUpdateDialog(
                 ),
                 child: SingleChildScrollView(
                   child: Text(
-                    updateInfo.releaseNotes.trim(),
+                    widget.updateInfo.releaseNotes.trim(),
                     style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
                   ),
                 ),
@@ -4623,14 +5030,14 @@ Future<void> showAppUpdateDialog(
       actions: [
         TextButton(
           key: const Key('update_later_button'),
-          onPressed: () => Navigator.pop(ctx),
+          onPressed: () => Navigator.pop(context),
           child: const Text('Later'),
         ),
-        if (updateInfo.releaseUrl.isNotEmpty &&
-            updateInfo.releaseUrl != updateInfo.downloadUrl)
+        if (widget.updateInfo.releaseUrl.isNotEmpty &&
+            widget.updateInfo.releaseUrl != widget.updateInfo.downloadUrl)
           TextButton(
             key: const Key('update_github_button'),
-            onPressed: () => launch(updateInfo.releaseUrl),
+            onPressed: () => _openUrl(widget.updateInfo.releaseUrl),
             child: const Text('View on GitHub'),
           ),
         FilledButton.icon(
@@ -4641,15 +5048,30 @@ Future<void> showAppUpdateDialog(
           ),
           icon: const Icon(Icons.download_rounded, size: 18),
           label: const Text('Update Now'),
-          onPressed: () {
-            Navigator.pop(ctx);
-            launch(updateInfo.downloadUrl);
-          },
+          onPressed: _startDownload,
         ),
       ],
-    ),
-  );
+    );
+  }
 }
+
+Future<void> showAppUpdateDialog(
+  BuildContext context,
+  AppUpdateInfo updateInfo, {
+  Future<void> Function(String url)? onLaunchUrl,
+  Future<void> Function(String filePath)? onInstallApk,
+  http.Client? httpClient,
+}) =>
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AppUpdateDialog(
+        updateInfo: updateInfo,
+        onLaunchUrl: onLaunchUrl,
+        onInstallApk: onInstallApk,
+        httpClient: httpClient,
+      ),
+    );
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({

@@ -2258,7 +2258,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.17.1'), findsOneWidget);
+    expect(find.text('LeadPilot v1.17.2'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -3215,8 +3215,8 @@ void main() {
     expect(info.currentVersion, '1.17.0');
   });
 
-  testWidgets('showAppUpdateDialog renders details and handles Update Now and Later', (tester) async {
-    String launchedUrl = '';
+  testWidgets('showAppUpdateDialog renders details, downloads with progress, and triggers installer', (tester) async {
+    String installedPath = '';
     const updateInfo = AppUpdateInfo(
       currentVersion: '1.17.0',
       latestVersion: '1.18.0',
@@ -3225,8 +3225,16 @@ void main() {
       releaseNotes: 'Performance improvements and bug fixes.',
       downloadUrl: 'https://example.com/app-release.apk',
       releaseUrl: 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.18.0',
-      apkSize: 62914560,
+      apkSize: 2048,
     );
+
+    final mockHttpClient = MockClient((request) async {
+      return http.Response.bytes(
+        List<int>.filled(2048, 42),
+        200,
+        headers: {'content-length': '2048'},
+      );
+    });
 
     await tester.pumpWidget(
       MaterialApp(
@@ -3237,8 +3245,9 @@ void main() {
                 onPressed: () => showAppUpdateDialog(
                   context,
                   updateInfo,
-                  onLaunchUrl: (url) async {
-                    launchedUrl = url;
+                  httpClient: mockHttpClient,
+                  onInstallApk: (path) async {
+                    installedPath = path;
                   },
                 ),
                 child: const Text('Show Dialog'),
@@ -3256,17 +3265,21 @@ void main() {
     expect(find.text('New Update Available'), findsOneWidget);
     expect(find.text('v1.17.0'), findsOneWidget);
     expect(find.text('v1.18.0'), findsOneWidget);
-    expect(find.text('Download size: 60.0 MB'), findsOneWidget);
     expect(find.text("What's New:"), findsOneWidget);
     expect(find.text('Performance improvements and bug fixes.'), findsOneWidget);
 
     final updateNowBtn = find.byKey(const Key('update_now_button'));
     expect(updateNowBtn, findsOneWidget);
     await tester.tap(updateNowBtn);
+    await tester.pump();
+    await tester.runAsync(() async {
+      await Future.delayed(const Duration(milliseconds: 100));
+    });
     await tester.pumpAndSettle();
 
-    expect(launchedUrl, 'https://example.com/app-release.apk');
-    expect(find.byKey(const Key('app_update_dialog')), findsNothing);
+    expect(installedPath.endsWith('LeadPilot-update.apk'), isTrue);
+    expect(find.text('Update Ready!'), findsOneWidget);
+    expect(find.byKey(const Key('install_now_button')), findsOneWidget);
   });
 
   testWidgets('Settings displays App Updates card and allows manual check and toggle', (tester) async {
@@ -3275,10 +3288,10 @@ void main() {
       client: MockClient((request) async {
         return http.Response(
           jsonEncode({
-            'tag_name': 'v1.17.1',
-            'name': 'LeadPilot v1.17.1',
+            'tag_name': 'v1.17.2',
+            'name': 'LeadPilot v1.17.2',
             'body': 'Current release',
-            'html_url': 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.17.1',
+            'html_url': 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.17.2',
             'assets': [],
           }),
           200,
@@ -3327,7 +3340,7 @@ void main() {
     await tester.tap(checkBtn);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
-    expect(find.text('LeadPilot is up to date (v1.17.1).'), findsOneWidget);
+    expect(find.text('LeadPilot is up to date (v1.17.2).'), findsOneWidget);
 
     // Toggle Auto-check
     final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
