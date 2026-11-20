@@ -21,7 +21,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.18.1';
+const String kAppVersion = '1.18.2';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -4394,25 +4394,30 @@ class DefaultVoiceToTextService implements VoiceToTextService {
       : _speech = speech ?? stt.SpeechToText();
 
   final stt.SpeechToText _speech;
-  static const _nativeSpeechChannel =
-      MethodChannel('com.example.call_dial/speech');
   bool _initialized = false;
-  bool _isNativeListening = false;
+  void Function(String status)? _activeOnStatus;
+  void Function(String error)? _activeOnError;
 
   @override
   bool get isAvailable => _speech.isAvailable;
 
   @override
-  bool get isListening => _isNativeListening || _speech.isListening;
+  bool get isListening => _speech.isListening;
 
   @override
   Future<bool> initialize() async {
-    if (Platform.isAndroid) return true;
     if (_initialized && _speech.isAvailable) return true;
     try {
       _initialized = await _speech.initialize(
-        onError: (err) => debugPrint('SpeechToText error: ${err.errorMsg}'),
-        onStatus: (status) => debugPrint('SpeechToText status: $status'),
+        onError: (err) {
+          debugPrint('SpeechToText error: ${err.errorMsg}');
+          _activeOnError?.call(err.errorMsg);
+        },
+        onStatus: (status) {
+          debugPrint('SpeechToText status: $status');
+          _activeOnStatus?.call(status);
+        },
+        debugLogging: false,
       );
       return _initialized;
     } catch (e) {
@@ -4428,29 +4433,9 @@ class DefaultVoiceToTextService implements VoiceToTextService {
     void Function(String error)? onError,
     String? localeId,
   }) async {
-    // 1. Try Native Android Speech Recognizer (Google Speech Dialog) first
-    if (Platform.isAndroid) {
-      try {
-        _isNativeListening = true;
-        onStatus?.call('listening');
-        final spoken = await _nativeSpeechChannel.invokeMethod<String>(
-          'recognizeSpeech',
-          {'prompt': 'Speak call remark (Sinhala or English)...'},
-        );
-        _isNativeListening = false;
-        onStatus?.call('notListening');
-        if (spoken != null && spoken.trim().isNotEmpty) {
-          onResult(spoken.trim());
-        }
-        return;
-      } catch (e) {
-        _isNativeListening = false;
-        onStatus?.call('notListening');
-        debugPrint('Native speech recognition fallback: $e');
-      }
-    }
+    _activeOnStatus = onStatus;
+    _activeOnError = onError;
 
-    // 2. In-app SpeechToText fallback
     final available = await initialize();
     if (!available) {
       onError?.call(
@@ -4458,6 +4443,19 @@ class DefaultVoiceToTextService implements VoiceToTextService {
       );
       return;
     }
+
+    String effectiveLocale = localeId ?? 'si_LK';
+
+    // Match exact device locale (e.g. si_LK or si-LK, en_US or en-US)
+    try {
+      final locales = await _speech.locales();
+      final prefix = effectiveLocale.split(RegExp('[-_]')).first.toLowerCase();
+      final match = locales.firstWhere(
+        (l) => l.localeId.toLowerCase().startsWith(prefix),
+        orElse: () => stt.LocaleName(effectiveLocale, effectiveLocale),
+      );
+      effectiveLocale = match.localeId;
+    } catch (_) {}
 
     try {
       await _speech.listen(
@@ -4472,7 +4470,8 @@ class DefaultVoiceToTextService implements VoiceToTextService {
           partialResults: true,
           listenFor: const Duration(seconds: 60),
           pauseFor: const Duration(seconds: 4),
-          localeId: localeId,
+          localeId: effectiveLocale,
+          onDevice: false,
         ),
       );
     } catch (e) {
@@ -4482,7 +4481,6 @@ class DefaultVoiceToTextService implements VoiceToTextService {
 
   @override
   Future<void> stop() async {
-    _isNativeListening = false;
     try {
       await _speech.stop();
     } catch (_) {}
@@ -4490,7 +4488,6 @@ class DefaultVoiceToTextService implements VoiceToTextService {
 
   @override
   Future<void> cancel() async {
-    _isNativeListening = false;
     try {
       await _speech.cancel();
     } catch (_) {}
@@ -6984,6 +6981,7 @@ class _StudentHistoryDialogState extends State<StudentHistoryDialog> {
     final controller = TextEditingController(text: currentText);
     bool isPolishing = false;
     bool isListeningVoice = false;
+    String voiceLanguage = 'si';
     String preVoiceText = '';
     final voiceService =
         widget.voiceToTextService ?? DefaultVoiceToTextService();
@@ -7000,7 +6998,9 @@ class _StudentHistoryDialogState extends State<StudentHistoryDialog> {
             }
             preVoiceText = controller.text;
             setDialogState(() => isListeningVoice = true);
+            final localeId = voiceLanguage == 'si' ? 'si_LK' : 'en_US';
             await voiceService.listen(
+              localeId: localeId,
               onResult: (words) {
                 if (words.trim().isEmpty) return;
                 setDialogState(() {
@@ -7048,42 +7048,31 @@ class _StudentHistoryDialogState extends State<StudentHistoryDialog> {
                     minLines: 2,
                     maxLines: 4,
                     autofocus: true,
-                    decoration: InputDecoration(
+                    decoration: const InputDecoration(
                       labelText: 'Remark / Comment',
                       alignLabelWithHint: true,
-                      border: const OutlineInputBorder(),
-                      suffixIcon: IconButton(
-                        tooltip: isListeningVoice
-                            ? 'Stop listening'
-                            : 'Voice to text (Speak)',
-                        icon: Icon(
-                          isListeningVoice
-                              ? Icons.mic_rounded
-                              : Icons.mic_none_rounded,
-                          color: isListeningVoice
-                              ? Colors.redAccent
-                              : const Color(0xFF00966D),
-                        ),
-                        onPressed: toggleVoice,
-                      ),
+                      border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 6,
+                    runSpacing: 6,
                     children: [
                       if (isListeningVoice)
-                        const Row(
+                        Row(
                           children: [
-                            Icon(
+                            const Icon(
                               Icons.fiber_manual_record,
                               color: Colors.redAccent,
                               size: 10,
                             ),
-                            SizedBox(width: 4),
+                            const SizedBox(width: 4),
                             Text(
-                              'Listening...',
-                              style: TextStyle(
+                              'Listening (${voiceLanguage == 'si' ? 'Sinhala' : 'EN'})...',
+                              style: const TextStyle(
                                 color: Colors.redAccent,
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,
@@ -7096,6 +7085,42 @@ class _StudentHistoryDialogState extends State<StudentHistoryDialog> {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () {
+                              setDialogState(() {
+                                voiceLanguage =
+                                    voiceLanguage == 'si' ? 'en' : 'si';
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(16),
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest,
+                                border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant
+                                      .withValues(alpha: 0.6),
+                                ),
+                              ),
+                              child: Text(
+                                voiceLanguage == 'si' ? 'සිංහල' : 'EN',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
                           OutlinedButton.icon(
                             style: OutlinedButton.styleFrom(
                               visualDensity: VisualDensity.compact,
@@ -8251,6 +8276,7 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
       widget.voiceToTextService ?? DefaultVoiceToTextService();
   bool _isPolishing = false;
   bool _isListeningVoice = false;
+  String _voiceLanguage = 'si';
   String _preVoiceText = '';
   late Student _activeStudent = widget.student;
 
@@ -8506,7 +8532,10 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
     _preVoiceText = _commentController.text;
     setState(() => _isListeningVoice = true);
 
+    final localeId = _voiceLanguage == 'si' ? 'si_LK' : 'en_US';
+
     await _voiceService.listen(
+      localeId: localeId,
       onResult: (words) {
         if (!mounted || words.trim().isEmpty) return;
         setState(() {
@@ -8982,27 +9011,12 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
                   controller: _commentController,
                   minLines: 2,
                   maxLines: 4,
-                  decoration: InputDecoration(
+                  decoration: const InputDecoration(
                     labelText: 'Call remark (optional)',
                     alignLabelWithHint: true,
-                    prefixIcon: const Padding(
+                    prefixIcon: Padding(
                       padding: EdgeInsets.only(bottom: 24),
                       child: Icon(Icons.notes_outlined),
-                    ),
-                    suffixIcon: IconButton(
-                      key: const Key('voice_to_text_suffix_button'),
-                      tooltip: _isListeningVoice
-                          ? 'Stop listening'
-                          : 'Voice to text (Speak remark)',
-                      icon: Icon(
-                        _isListeningVoice
-                            ? Icons.mic_rounded
-                            : Icons.mic_none_rounded,
-                        color: _isListeningVoice
-                            ? Colors.redAccent
-                            : const Color(0xFF00966D),
-                      ),
-                      onPressed: _toggleVoice,
                     ),
                   ),
                 ),
@@ -9025,7 +9039,7 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
-                                    'Listening... Speak in Sinhala or English',
+                                    'Listening in ${_voiceLanguage == 'si' ? 'Sinhala' : 'English'}...',
                                     style: Theme.of(context)
                                         .textTheme
                                         .labelSmall
@@ -9041,7 +9055,7 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
                               ],
                             )
                           : Text(
-                              'Draft in Sinhala, Singlish, or rough English',
+                              'Draft in Sinhala, Singlish, or English',
                               style: Theme.of(context)
                                   .textTheme
                                   .labelSmall
@@ -9053,6 +9067,54 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
                                     fontSize: 11,
                                   ),
                             ),
+                    ),
+                    const SizedBox(width: 4),
+                    // Language switcher chip (සිංහල / English)
+                    InkWell(
+                      key: const Key('voice_language_toggle'),
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () {
+                        setState(() {
+                          _voiceLanguage = _voiceLanguage == 'si' ? 'en' : 'si';
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest,
+                          border: Border.all(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .outlineVariant
+                                .withValues(alpha: 0.6),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.language_rounded,
+                              size: 13,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              _voiceLanguage == 'si' ? 'සිංහල' : 'English',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                     const SizedBox(width: 6),
                     OutlinedButton.icon(

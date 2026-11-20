@@ -2308,7 +2308,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.18.1'), findsOneWidget);
+    expect(find.text('LeadPilot v1.18.2'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -3258,10 +3258,21 @@ void main() {
     await tester.pumpAndSettle();
 
     final voiceBtn = find.byKey(const Key('voice_to_text_button'));
-    final voiceSuffix = find.byKey(const Key('voice_to_text_suffix_button'));
+    final langToggle = find.byKey(const Key('voice_language_toggle'));
     expect(voiceBtn, findsOneWidget);
-    expect(voiceSuffix, findsOneWidget);
+    expect(langToggle, findsOneWidget);
+    expect(find.text('සිංහල'), findsOneWidget);
     expect(find.text('🎙️ Speak'), findsOneWidget);
+
+    // Toggle language from Sinhala to English and back
+    await tester.ensureVisible(langToggle);
+    await tester.tap(langToggle);
+    await tester.pump();
+    expect(find.text('English'), findsOneWidget);
+
+    await tester.tap(langToggle);
+    await tester.pump();
+    expect(find.text('සිංහල'), findsOneWidget);
 
     // 1. Tap Speak button
     await tester.ensureVisible(voiceBtn);
@@ -3471,10 +3482,10 @@ void main() {
       client: MockClient((request) async {
         return http.Response(
           jsonEncode({
-            'tag_name': 'v1.18.1',
-            'name': 'LeadPilot v1.18.1',
+            'tag_name': 'v1.18.2',
+            'name': 'LeadPilot v1.18.2',
             'body': 'Current release',
-            'html_url': 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.18.1',
+            'html_url': 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.18.2',
             'assets': [],
           }),
           200,
@@ -3523,7 +3534,7 @@ void main() {
     await tester.tap(checkBtn);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
-    expect(find.text('LeadPilot is up to date (v1.18.1).'), findsOneWidget);
+    expect(find.text('LeadPilot is up to date (v1.18.2).'), findsOneWidget);
 
     // Toggle Auto-check
     final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
