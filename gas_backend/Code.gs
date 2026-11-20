@@ -285,6 +285,16 @@ function appendNewAttempts_(sheet, rowNumber, attempts) {
       comment: text_(existingCells[offset + 2]),
     };
     if (attempt.dateTime !== '' || attempt.status !== '' || attempt.comment !== '') {
+      // Check if this attempt exists in incoming payload with an updated comment
+      const matched = attempts.find(function(a) {
+        return Math.floor(dateValue_(a.dateTime) / 1000) === Math.floor(dateValue_(attempt.dateTime) / 1000) &&
+               a.status === attempt.status;
+      });
+      if (matched && matched.comment !== attempt.comment) {
+        const colIndex = FIXED_HEADERS.length + 1 + offset + 2;
+        sheet.getRange(rowNumber, colIndex).setValue(matched.comment);
+        attempt.comment = matched.comment;
+      }
       existingAttempts.push(attempt);
       known[attemptKey_(attempt)] = true;
     }

@@ -3100,6 +3100,54 @@ class Student {
     );
   }
 
+  Student updateLastComment(String newComment) {
+    final trimmed = newComment.trim();
+
+    // 1. Update commentHistory (only the last entry)
+    final newHistory = List<String>.of(commentHistory);
+    if (newHistory.isNotEmpty) {
+      final lastEntry = newHistory.last;
+      final separatorIndex = lastEntry.indexOf(' — ');
+      if (separatorIndex >= 0) {
+        final datePart = lastEntry.substring(0, separatorIndex);
+        newHistory[newHistory.length - 1] = '$datePart — $trimmed';
+      } else {
+        newHistory[newHistory.length - 1] = trimmed;
+      }
+    } else if (trimmed.isNotEmpty) {
+      final formattedNow = _formatReminder(DateTime.now());
+      newHistory.add('$formattedNow — $trimmed');
+    }
+
+    // 2. Update attempts (only the last attempt with a comment, or the very last attempt)
+    final newAttempts = List<CallAttempt>.of(attempts);
+    int lastAttemptIndex = -1;
+    for (int i = newAttempts.length - 1; i >= 0; i--) {
+      if (newAttempts[i].comment.trim().isNotEmpty) {
+        lastAttemptIndex = i;
+        break;
+      }
+    }
+    if (lastAttemptIndex < 0 && newAttempts.isNotEmpty) {
+      lastAttemptIndex = newAttempts.length - 1;
+    }
+
+    if (lastAttemptIndex >= 0) {
+      final target = newAttempts[lastAttemptIndex];
+      newAttempts[lastAttemptIndex] = CallAttempt(
+        dateTime: target.dateTime,
+        status: target.status,
+        comment: trimmed,
+      );
+    }
+
+    return copyWith(
+      comment: trimmed,
+      commentHistory: newHistory,
+      attempts: newAttempts,
+    );
+  }
+
   String get initials => name
       .trim()
       .split(RegExp(r'\s+'))
@@ -5830,6 +5878,40 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       student,
       title: 'Call history · ${student.name}',
+      settingsStore: _settingsStore,
+      geminiService: GeminiService(),
+      onStudentUpdated: (updatedStudent) async {
+        final index = _students.indexWhere(
+          (s) =>
+              normalizeContactPhone(s.phone) ==
+              normalizeContactPhone(student.phone),
+        );
+        if (index >= 0) {
+          setState(() {
+            _students[index] = updatedStudent;
+          });
+          await _settingsStore.saveCachedStudents(_students);
+        }
+        if (widget.sheetConfig.isNotEmpty) {
+          try {
+            await widget.sheetService.updateStudentInSheet(
+              widget.sheetConfig,
+              updatedStudent,
+              previousPhone: student.phone,
+            );
+          } catch (_) {
+            await _enqueueOfflineAction(
+              QueuedSheetAction(
+                id: '${student.phone}_${DateTime.now().millisecondsSinceEpoch}',
+                action: 'update',
+                student: updatedStudent,
+                previousPhone: student.phone,
+                queuedAt: DateTime.now(),
+              ),
+            );
+          }
+        }
+      },
     );
   }
 }
@@ -5838,88 +5920,307 @@ Future<void> _showStudentHistory(
   BuildContext context,
   Student student, {
   required String title,
+  Future<void> Function(Student updatedStudent)? onStudentUpdated,
+  AppSettingsStore? settingsStore,
+  GeminiService? geminiService,
 }) {
-  final entries =
-      <
-        ({
-          DateTime? date,
-          String dateLabel,
-          int order,
-          String status,
-          String text,
-        })
-      >[];
-  final attemptCommentCounts = <String, int>{};
-  var order = 0;
-  for (final attempt in student.attempts) {
-    final date = DateTime.tryParse(attempt.dateTime);
-    final text = attempt.comment.trim();
-    if (text.isNotEmpty) {
-      attemptCommentCounts.update(
-        text,
-        (count) => count + 1,
-        ifAbsent: () => 1,
-      );
-    }
-    entries.add((
-      date: date,
-      dateLabel: date == null ? attempt.dateTime : _formatReminder(date),
-      order: order++,
-      status: attempt.status,
-      text: text,
-    ));
-  }
-
-  for (final entry in student.commentHistory) {
-    final separator = entry.indexOf(' — ');
-    final text = separator < 0
-        ? entry.trim()
-        : entry.substring(separator + 3).trim();
-    if (text.isEmpty) continue;
-    final duplicateCount = attemptCommentCounts[text] ?? 0;
-    if (duplicateCount > 0) {
-      attemptCommentCounts[text] = duplicateCount - 1;
-      continue;
-    }
-    final dateLabel = separator < 0 ? '' : entry.substring(0, separator);
-    final date = dateLabel.length >= 10
-        ? DateTime.tryParse(dateLabel.substring(0, 10))
-        : null;
-    entries.add((
-      date: date,
-      dateLabel: dateLabel,
-      order: order++,
-      status: '',
-      text: text,
-    ));
-  }
-  final currentComment = student.comment.trim();
-  if (currentComment.isNotEmpty &&
-      !entries.any((entry) => entry.text == currentComment)) {
-    entries.add((
-      date: null,
-      dateLabel: '',
-      order: order++,
-      status: student.callStatus,
-      text: currentComment,
-    ));
-  }
-  entries.sort((left, right) {
-    if (left.date == null && right.date != null) return 1;
-    if (right.date == null && left.date != null) return -1;
-    final dateComparison = left.date?.compareTo(right.date!) ?? 0;
-    return dateComparison != 0
-        ? dateComparison
-        : left.order.compareTo(right.order);
-  });
-
   return showDialog<void>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: Text(title),
+    builder: (context) => StudentHistoryDialog(
+      student: student,
+      title: title,
+      onStudentUpdated: onStudentUpdated,
+      settingsStore: settingsStore,
+      geminiService: geminiService,
+    ),
+  );
+}
+
+class StudentHistoryDialog extends StatefulWidget {
+  const StudentHistoryDialog({
+    super.key,
+    required this.student,
+    required this.title,
+    this.onStudentUpdated,
+    this.settingsStore,
+    this.geminiService,
+  });
+
+  final Student student;
+  final String title;
+  final Future<void> Function(Student updatedStudent)? onStudentUpdated;
+  final AppSettingsStore? settingsStore;
+  final GeminiService? geminiService;
+
+  @override
+  State<StudentHistoryDialog> createState() => _StudentHistoryDialogState();
+}
+
+class _StudentHistoryDialogState extends State<StudentHistoryDialog> {
+  late Student _currentStudent = widget.student;
+  bool _isSaving = false;
+
+  List<({DateTime? date, String dateLabel, int order, String status, String text})>
+      _buildEntries(Student student) {
+    final entries = <({
+      DateTime? date,
+      String dateLabel,
+      int order,
+      String status,
+      String text,
+    })>[];
+    final attemptCommentCounts = <String, int>{};
+    var order = 0;
+    for (final attempt in student.attempts) {
+      final date = DateTime.tryParse(attempt.dateTime);
+      final text = attempt.comment.trim();
+      if (text.isNotEmpty) {
+        attemptCommentCounts.update(
+          text,
+          (count) => count + 1,
+          ifAbsent: () => 1,
+        );
+      }
+      entries.add((
+        date: date,
+        dateLabel: date == null ? attempt.dateTime : _formatReminder(date),
+        order: order++,
+        status: attempt.status,
+        text: text,
+      ));
+    }
+
+    for (final entry in student.commentHistory) {
+      final separator = entry.indexOf(' — ');
+      final text = separator < 0
+          ? entry.trim()
+          : entry.substring(separator + 3).trim();
+      if (text.isEmpty) continue;
+      final duplicateCount = attemptCommentCounts[text] ?? 0;
+      if (duplicateCount > 0) {
+        attemptCommentCounts[text] = duplicateCount - 1;
+        continue;
+      }
+      final dateLabel = separator < 0 ? '' : entry.substring(0, separator);
+      final date = dateLabel.length >= 10
+          ? DateTime.tryParse(dateLabel.substring(0, 10))
+          : null;
+      entries.add((
+        date: date,
+        dateLabel: dateLabel,
+        order: order++,
+        status: '',
+        text: text,
+      ));
+    }
+    final currentComment = student.comment.trim();
+    if (currentComment.isNotEmpty &&
+        !entries.any((entry) => entry.text == currentComment)) {
+      entries.add((
+        date: null,
+        dateLabel: '',
+        order: order++,
+        status: student.callStatus,
+        text: currentComment,
+      ));
+    }
+    entries.sort((left, right) {
+      if (left.date == null && right.date != null) return 1;
+      if (right.date == null && left.date != null) return -1;
+      final dateComparison = left.date?.compareTo(right.date!) ?? 0;
+      return dateComparison != 0
+          ? dateComparison
+          : left.order.compareTo(right.order);
+    });
+    return entries;
+  }
+
+  Future<void> _editLastRemark(String currentText) async {
+    final controller = TextEditingController(text: currentText);
+    bool isPolishing = false;
+
+    final updatedText = await showDialog<String>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.edit_note_rounded, color: Color(0xFF8B5CF6)),
+                SizedBox(width: 8),
+                Text('Edit Last Remark', style: TextStyle(fontSize: 18)),
+              ],
+            ),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Correct or update the most recent call remark for ${_currentStudent.name}:',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: controller,
+                    minLines: 2,
+                    maxLines: 4,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Remark / Comment',
+                      alignLabelWithHint: true,
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        foregroundColor: const Color(0xFF8B5CF6),
+                        side: BorderSide(
+                          color: const Color(0xFF8B5CF6).withValues(alpha: 0.6),
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      onPressed: isPolishing
+                          ? null
+                          : () async {
+                              final raw = controller.text.trim();
+                              if (raw.isEmpty) return;
+                              final store = widget.settingsStore ??
+                                  SecureAppSettingsStore();
+                              final apiKey = await store.readGeminiApiKey();
+                              if (apiKey.trim().isEmpty) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Please configure Gemini API key in Settings.',
+                                      ),
+                                      duration: Duration(seconds: 3),
+                                    ),
+                                  );
+                                }
+                                return;
+                              }
+                              setDialogState(() => isPolishing = true);
+                              try {
+                                final service =
+                                    widget.geminiService ?? GeminiService();
+                                final model = await store.readGeminiModel();
+                                final polished = await service.polishRemark(
+                                  apiKey: apiKey,
+                                  rawRemark: raw,
+                                  model: model,
+                                );
+                                if (polished.isNotEmpty) {
+                                  controller.text = polished;
+                                  controller.selection =
+                                      TextSelection.fromPosition(
+                                    TextPosition(offset: polished.length),
+                                  );
+                                }
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Could not polish: $e'),
+                                    ),
+                                  );
+                                }
+                              } finally {
+                                setDialogState(() => isPolishing = false);
+                              }
+                            },
+                      icon: isPolishing
+                          ? const SizedBox(
+                              width: 12,
+                              height: 12,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.auto_awesome_rounded, size: 14),
+                      label: Text(
+                        isPolishing ? 'Polishing...' : '✨ Polish (AI)',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final text = controller.text.trim();
+                  Navigator.pop(dialogCtx, text);
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (updatedText == null || updatedText == currentText.trim()) return;
+
+    setState(() => _isSaving = true);
+    final updatedStudent = _currentStudent.updateLastComment(updatedText);
+    try {
+      if (widget.onStudentUpdated != null) {
+        await widget.onStudentUpdated!(updatedStudent);
+      }
+      setState(() {
+        _currentStudent = updatedStudent;
+        _isSaving = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✨ Last remark updated!'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() => _isSaving = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update remark: $e')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = _buildEntries(_currentStudent);
+    final lastCommentIndex =
+        entries.lastIndexWhere((e) => e.text.trim().isNotEmpty);
+
+    return AlertDialog(
+      title: Text(widget.title),
       content: SizedBox(
         width: 440,
-        child: entries.isEmpty && student.note.isEmpty
+        child: entries.isEmpty && _currentStudent.note.isEmpty
             ? const Text('No call history or comments have been saved.')
             : ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 420),
@@ -5928,27 +6229,55 @@ Future<void> _showStudentHistory(
                   itemCount: entries.isEmpty ? 1 : entries.length,
                   separatorBuilder: (_, _) => const Divider(height: 22),
                   itemBuilder: (context, index) {
-                    if (entries.isEmpty) return Text(student.note);
+                    if (entries.isEmpty) return Text(_currentStudent.note);
                     final entry = entries[index];
+                    final isLatestComment = (index == lastCommentIndex);
+
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         if (entry.status.isNotEmpty ||
-                            entry.dateLabel.isNotEmpty)
+                            entry.dateLabel.isNotEmpty ||
+                            isLatestComment)
                           Row(
                             children: [
                               if (entry.status.isNotEmpty)
-                                Expanded(
+                                Text(
+                                  entry.status,
+                                  style: TextStyle(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              if (isLatestComment) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary
+                                        .withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
                                   child: Text(
-                                    entry.status,
+                                    'Latest',
                                     style: TextStyle(
                                       color: Theme.of(context)
                                           .colorScheme
                                           .primary,
+                                      fontSize: 10,
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
                                 ),
+                              ],
+                              const Spacer(),
                               if (entry.dateLabel.isNotEmpty)
                                 Text(
                                   entry.dateLabel,
@@ -5965,6 +6294,36 @@ Future<void> _showStudentHistory(
                           const SizedBox(height: 6),
                           Text(entry.text),
                         ],
+                        if (isLatestComment &&
+                            entry.text.trim().isNotEmpty &&
+                            widget.onStudentUpdated != null) ...[
+                          const SizedBox(height: 4),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton.icon(
+                              key: const Key('edit_last_remark_button'),
+                              style: TextButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                foregroundColor: const Color(0xFF8B5CF6),
+                              ),
+                              icon: const Icon(Icons.edit_rounded, size: 14),
+                              label: const Text(
+                                'Edit last remark',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              onPressed: _isSaving
+                                  ? null
+                                  : () => _editLastRemark(entry.text),
+                            ),
+                          ),
+                        ],
                       ],
                     );
                   },
@@ -5977,8 +6336,8 @@ Future<void> _showStudentHistory(
           child: const Text('Close'),
         ),
       ],
-    ),
-  );
+    );
+  }
 }
 
 class _LeadFilterSheet extends StatefulWidget {
@@ -6818,6 +7177,7 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
   late final GeminiService _geminiService =
       widget.geminiService ?? GeminiService();
   bool _isPolishing = false;
+  late Student _activeStudent = widget.student;
 
   late final _nameController = TextEditingController(text: widget.student.name);
   late final _phoneController = TextEditingController(
@@ -6895,10 +7255,10 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
     final name = _nameController.text.trim();
     final phone = _phoneController.text.trim();
     final newComment = _commentController.text.trim();
-    final history = List<String>.of(widget.student.commentHistory);
-    final attempts = List<CallAttempt>.of(widget.student.attempts);
+    final history = List<String>.of(_activeStudent.commentHistory);
+    final attempts = List<CallAttempt>.of(_activeStudent.attempts);
     final attemptedAt = DateTime.now();
-    final callStatus = _callStatus ?? widget.student.callStatus;
+    final callStatus = _callStatus ?? _activeStudent.callStatus;
     if (newComment.isNotEmpty) {
       history.add('${_formatReminder(DateTime.now())} — $newComment');
     }
@@ -6917,7 +7277,7 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
             ? ''
             : _nextCallDateTime!.toIso8601String();
 
-    return widget.student.copyWith(
+    return _activeStudent.copyWith(
       name: name,
       phone: phone,
       examType: _examType ?? '',
@@ -7046,8 +7406,15 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
 
   Future<void> _showCommentHistory() => _showStudentHistory(
     context,
-    widget.student,
+    _activeStudent,
     title: 'Call attempt history',
+    settingsStore: _settingsStore,
+    geminiService: _geminiService,
+    onStudentUpdated: (updated) async {
+      setState(() {
+        _activeStudent = updated;
+      });
+    },
   );
 
   Future<void> _polishRemarkWithAi() async {
@@ -8498,7 +8865,7 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.16.1',
+                    'LeadPilot v1.16.2',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,
