@@ -2258,7 +2258,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.16.2'), findsOneWidget);
+    expect(find.text('LeadPilot v1.17.0'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -3159,5 +3159,180 @@ void main() {
 
     // Reverted back to raw text
     expect(find.text('student kata kala se degree kamathi kiwwa hawasa call ganna'), findsOneWidget);
+  });
+
+  test('AppUpdateService.compareVersions compares semantic versions accurately', () {
+    expect(AppUpdateService.compareVersions('1.16.2', '1.17.0'), 1);
+    expect(AppUpdateService.compareVersions('1.17.0', '1.16.2'), -1);
+    expect(AppUpdateService.compareVersions('1.17.0', '1.17.0'), 0);
+    expect(AppUpdateService.compareVersions('v1.17.0+33', 'v1.17.1'), 1);
+    expect(AppUpdateService.compareVersions('1.17.0', '2.0.0'), 1);
+    expect(AppUpdateService.compareVersions('1.17.0', '1.16.99'), -1);
+  });
+
+  test('AppUpdateService.checkForUpdates parses GitHub release and assets correctly', () async {
+    final mockClient = MockClient((request) async {
+      expect(request.url.path, '/repos/jiatachira/LeadPilot/releases/latest');
+      return http.Response(
+        jsonEncode({
+          'tag_name': 'v1.18.0',
+          'name': 'LeadPilot v1.18.0 - Direct Updates',
+          'body': '### What\'s New\n* Added in-app updater\n* Bug fixes',
+          'html_url': 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.18.0',
+          'published_at': '2026-11-20T08:00:00Z',
+          'assets': [
+            {
+              'name': 'app-release.apk',
+              'browser_download_url': 'https://github.com/jiatachira/LeadPilot/releases/download/v1.18.0/app-release.apk',
+              'size': 63892011,
+            }
+          ],
+        }),
+        200,
+      );
+    });
+
+    final service = AppUpdateService(client: mockClient);
+    final info = await service.checkForUpdates(currentVersion: '1.17.0');
+
+    expect(info.hasUpdate, isTrue);
+    expect(info.latestVersion, '1.18.0');
+    expect(info.downloadUrl, 'https://github.com/jiatachira/LeadPilot/releases/download/v1.18.0/app-release.apk');
+    expect(info.releaseTitle, 'LeadPilot v1.18.0 - Direct Updates');
+    expect(info.releaseNotes, contains('Added in-app updater'));
+    expect(info.apkSize, 63892011);
+  });
+
+  test('AppUpdateService.checkForUpdates handles 404 no releases gracefully', () async {
+    final mockClient = MockClient((request) async {
+      return http.Response('{"message":"Not Found"}', 404);
+    });
+
+    final service = AppUpdateService(client: mockClient);
+    final info = await service.checkForUpdates(currentVersion: '1.17.0');
+
+    expect(info.hasUpdate, isFalse);
+    expect(info.currentVersion, '1.17.0');
+  });
+
+  testWidgets('showAppUpdateDialog renders details and handles Update Now and Later', (tester) async {
+    String launchedUrl = '';
+    const updateInfo = AppUpdateInfo(
+      currentVersion: '1.17.0',
+      latestVersion: '1.18.0',
+      hasUpdate: true,
+      releaseTitle: 'LeadPilot v1.18.0',
+      releaseNotes: 'Performance improvements and bug fixes.',
+      downloadUrl: 'https://example.com/app-release.apk',
+      releaseUrl: 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.18.0',
+      apkSize: 62914560,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: ElevatedButton(
+                onPressed: () => showAppUpdateDialog(
+                  context,
+                  updateInfo,
+                  onLaunchUrl: (url) async {
+                    launchedUrl = url;
+                  },
+                ),
+                child: const Text('Show Dialog'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Show Dialog'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('app_update_dialog')), findsOneWidget);
+    expect(find.text('New Update Available'), findsOneWidget);
+    expect(find.text('v1.17.0'), findsOneWidget);
+    expect(find.text('v1.18.0'), findsOneWidget);
+    expect(find.text('Download size: 60.0 MB'), findsOneWidget);
+    expect(find.text("What's New:"), findsOneWidget);
+    expect(find.text('Performance improvements and bug fixes.'), findsOneWidget);
+
+    final updateNowBtn = find.byKey(const Key('update_now_button'));
+    expect(updateNowBtn, findsOneWidget);
+    await tester.tap(updateNowBtn);
+    await tester.pumpAndSettle();
+
+    expect(launchedUrl, 'https://example.com/app-release.apk');
+    expect(find.byKey(const Key('app_update_dialog')), findsNothing);
+  });
+
+  testWidgets('Settings displays App Updates card and allows manual check and toggle', (tester) async {
+    final store = MemoryAppSettingsStore();
+    final updateService = AppUpdateService(
+      client: MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'tag_name': 'v1.17.0',
+            'name': 'LeadPilot v1.17.0',
+            'body': 'Current release',
+            'html_url': 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.17.0',
+            'assets': [],
+          }),
+          200,
+        );
+      }),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () => showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                builder: (_) => SettingsHubSheet(
+                  themeMode: ThemeMode.system,
+                  onThemeModeChanged: (_) async {},
+                  isSheetConnected: true,
+                  hasActiveFilters: false,
+                  biometricEnabled: false,
+                  onBiometricChanged: (_) async {},
+                  settingsStore: store,
+                  updateService: updateService,
+                ),
+              ),
+              child: const Text('Open Settings'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open Settings'));
+    await tester.pumpAndSettle();
+
+    final checkBtn = find.byKey(const Key('check_updates_button'));
+    await tester.ensureVisible(checkBtn);
+    await tester.pumpAndSettle();
+
+    expect(find.text('App Updates'), findsOneWidget);
+    expect(find.text('Check for Updates'), findsOneWidget);
+    expect(find.text('Auto-check on Startup'), findsOneWidget);
+
+    // Tap Check for Updates
+    await tester.tap(checkBtn);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('LeadPilot is up to date (v1.17.0).'), findsOneWidget);
+
+    // Toggle Auto-check
+    final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
+    await tester.tap(switchFinder);
+    await tester.pump();
+    expect(await store.readAutoCheckUpdates(), isFalse);
   });
 }

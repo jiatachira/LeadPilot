@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
@@ -19,6 +20,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
+const String kAppVersion = '1.17.0';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -731,6 +733,10 @@ abstract interface class AppSettingsStore {
   Future<String> readCompanyDescription();
 
   Future<void> saveCompanyDescription(String description);
+
+  Future<bool> readAutoCheckUpdates();
+
+  Future<void> saveAutoCheckUpdates(bool enabled);
 }
 
 class SecureAppSettingsStore implements AppSettingsStore {
@@ -749,6 +755,7 @@ class SecureAppSettingsStore implements AppSettingsStore {
   static const _geminiApiKeyKey = 'student_call_gemini_api_key';
   static const _geminiModelKey = 'student_call_gemini_model';
   static const _companyDescriptionKey = 'student_call_company_description';
+  static const _autoCheckUpdatesKey = 'student_call_auto_check_updates';
   final FlutterSecureStorage _storage;
 
   @override
@@ -906,6 +913,16 @@ class SecureAppSettingsStore implements AppSettingsStore {
       );
 
   @override
+  Future<bool> readAutoCheckUpdates() async {
+    final value = await _storage.read(key: _autoCheckUpdatesKey);
+    return value != 'false';
+  }
+
+  @override
+  Future<void> saveAutoCheckUpdates(bool enabled) =>
+      _storage.write(key: _autoCheckUpdatesKey, value: enabled.toString());
+
+  @override
   Future<void> saveSheetConfig(String url, {String name = ''}) async {
     final normalizedUrl = url.trim();
     final linkedSheets = await readLinkedSheets();
@@ -1050,6 +1067,16 @@ class MemoryAppSettingsStore implements AppSettingsStore {
     companyDescription = description.trim().isEmpty
         ? _defaultCompanyDescription
         : description.trim();
+  }
+
+  bool autoCheckUpdates = true;
+
+  @override
+  Future<bool> readAutoCheckUpdates() async => autoCheckUpdates;
+
+  @override
+  Future<void> saveAutoCheckUpdates(bool enabled) async {
+    autoCheckUpdates = enabled;
   }
 }
 
@@ -1710,6 +1737,7 @@ class StudentCallApp extends StatefulWidget {
     this.reminderScheduler,
     this.settingsStore,
     this.deviceContactsService,
+    this.updateService,
     this.showSplash = true,
     super.key,
   });
@@ -1718,6 +1746,7 @@ class StudentCallApp extends StatefulWidget {
   final ReminderScheduler? reminderScheduler;
   final AppSettingsStore? settingsStore;
   final DeviceContactsService? deviceContactsService;
+  final AppUpdateService? updateService;
   final bool showSplash;
 
   @override
@@ -1868,6 +1897,7 @@ class _StudentCallAppState extends State<StudentCallApp> {
               biometricEnabled: _biometricEnabled,
               onBiometricChanged: _saveBiometricEnabled,
               settingsStore: _settingsStore,
+              updateService: widget.updateService,
             )
           : PinScreen(
               key: ValueKey(_isFirstTime),
@@ -4206,6 +4236,307 @@ class GoogleSheetService {
   }
 }
 
+class AppUpdateInfo {
+  const AppUpdateInfo({
+    required this.currentVersion,
+    required this.latestVersion,
+    required this.hasUpdate,
+    this.releaseTitle = '',
+    this.releaseNotes = '',
+    this.downloadUrl = '',
+    this.releaseUrl = '',
+    this.publishedAt,
+    this.apkSize = 0,
+  });
+
+  final String currentVersion;
+  final String latestVersion;
+  final bool hasUpdate;
+  final String releaseTitle;
+  final String releaseNotes;
+  final String downloadUrl;
+  final String releaseUrl;
+  final DateTime? publishedAt;
+  final int apkSize;
+}
+
+class AppUpdateService {
+  AppUpdateService({
+    http.Client? client,
+    this.owner = 'jiatachira',
+    this.repo = 'LeadPilot',
+  })  : _client = client ?? http.Client(),
+        _ownsClient = client == null;
+
+  final http.Client _client;
+  final bool _ownsClient;
+  final String owner;
+  final String repo;
+
+  Future<AppUpdateInfo> checkForUpdates({
+    String currentVersion = kAppVersion,
+  }) async {
+    final url = Uri.parse(
+      'https://api.github.com/repos/$owner/$repo/releases/latest',
+    );
+    final response = await _client.get(
+      url,
+      headers: {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'LeadPilot-App',
+      },
+    );
+
+    if (response.statusCode == 404) {
+      return AppUpdateInfo(
+        currentVersion: currentVersion,
+        latestVersion: currentVersion,
+        hasUpdate: false,
+        releaseNotes: 'No releases found on GitHub.',
+      );
+    }
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Failed to check for updates (HTTP ${response.statusCode})',
+      );
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final tagName = (data['tag_name'] as String? ?? '').trim();
+    final cleanLatest =
+        tagName.replaceFirst(RegExp(r'^[vV]'), '').split('+').first;
+    final hasUpdate = compareVersions(currentVersion, cleanLatest) > 0;
+
+    final assets = (data['assets'] as List<dynamic>?) ?? [];
+    String apkDownloadUrl = '';
+    int apkSize = 0;
+    for (final asset in assets) {
+      if (asset is Map<String, dynamic>) {
+        final name = (asset['name'] as String? ?? '').toLowerCase();
+        if (name.endsWith('.apk')) {
+          apkDownloadUrl = asset['browser_download_url'] as String? ?? '';
+          apkSize = (asset['size'] as num?)?.toInt() ?? 0;
+          break;
+        }
+      }
+    }
+
+    final htmlUrl =
+        data['html_url'] as String? ?? 'https://github.com/$owner/$repo/releases';
+    if (apkDownloadUrl.isEmpty) {
+      apkDownloadUrl = htmlUrl;
+    }
+
+    return AppUpdateInfo(
+      currentVersion: currentVersion,
+      latestVersion: cleanLatest.isNotEmpty ? cleanLatest : tagName,
+      hasUpdate: hasUpdate,
+      releaseTitle: data['name'] as String? ?? tagName,
+      releaseNotes: data['body'] as String? ?? '',
+      downloadUrl: apkDownloadUrl,
+      releaseUrl: htmlUrl,
+      publishedAt: DateTime.tryParse(data['published_at'] as String? ?? ''),
+      apkSize: apkSize,
+    );
+  }
+
+  static int compareVersions(String current, String latest) {
+    String clean(String v) =>
+        v.trim().toLowerCase().replaceFirst(RegExp(r'^[vV]'), '').split('+').first;
+    final cParts = clean(current)
+        .split('.')
+        .map((e) => int.tryParse(e) ?? 0)
+        .toList();
+    final lParts = clean(latest)
+        .split('.')
+        .map((e) => int.tryParse(e) ?? 0)
+        .toList();
+
+    final maxLen = math.max(cParts.length, lParts.length);
+    for (var i = 0; i < maxLen; i++) {
+      final c = i < cParts.length ? cParts[i] : 0;
+      final l = i < lParts.length ? lParts[i] : 0;
+      if (l > c) return 1;
+      if (l < c) return -1;
+    }
+    return 0;
+  }
+
+  void close() {
+    if (_ownsClient) _client.close();
+  }
+}
+
+Future<void> showAppUpdateDialog(
+  BuildContext context,
+  AppUpdateInfo updateInfo, {
+  Future<void> Function(String url)? onLaunchUrl,
+}) async {
+  final theme = Theme.of(context);
+  final isDark = theme.brightness == Brightness.dark;
+  final launch = onLaunchUrl ??
+      (url) async {
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      };
+
+  await showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      key: const Key('app_update_dialog'),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF62D6B0).withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.system_update_rounded,
+              color: Color(0xFF00966D),
+              size: 26,
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'New Update Available',
+              style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF334155)
+                        : const Color(0xFFE2E8F0),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'v${updateInfo.currentVersion}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white70 : Colors.black87,
+                    ),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8),
+                  child: Icon(Icons.arrow_forward_rounded, size: 16),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00966D),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'v${updateInfo.latestVersion}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (updateInfo.apkSize > 0) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Download size: ${(updateInfo.apkSize / (1024 * 1024)).toStringAsFixed(1)} MB',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+            if (updateInfo.releaseNotes.trim().isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text(
+                "What's New:",
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                width: double.maxFinite,
+                constraints: const BoxConstraints(maxHeight: 180),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.5,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: theme.colorScheme.outlineVariant.withValues(
+                      alpha: 0.5,
+                    ),
+                  ),
+                ),
+                child: SingleChildScrollView(
+                  child: Text(
+                    updateInfo.releaseNotes.trim(),
+                    style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          key: const Key('update_later_button'),
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('Later'),
+        ),
+        if (updateInfo.releaseUrl.isNotEmpty &&
+            updateInfo.releaseUrl != updateInfo.downloadUrl)
+          TextButton(
+            key: const Key('update_github_button'),
+            onPressed: () => launch(updateInfo.releaseUrl),
+            child: const Text('View on GitHub'),
+          ),
+        FilledButton.icon(
+          key: const Key('update_now_button'),
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF00966D),
+            foregroundColor: Colors.white,
+          ),
+          icon: const Icon(Icons.download_rounded, size: 18),
+          label: const Text('Update Now'),
+          onPressed: () {
+            Navigator.pop(ctx);
+            launch(updateInfo.downloadUrl);
+          },
+        ),
+      ],
+    ),
+  );
+}
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
     required this.sheetConfig,
@@ -4221,6 +4552,7 @@ class HomeScreen extends StatefulWidget {
     required this.biometricEnabled,
     required this.onBiometricChanged,
     this.settingsStore,
+    this.updateService,
     super.key,
   });
 
@@ -4237,6 +4569,7 @@ class HomeScreen extends StatefulWidget {
   final bool biometricEnabled;
   final Future<void> Function(bool) onBiometricChanged;
   final AppSettingsStore? settingsStore;
+  final AppUpdateService? updateService;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -4248,6 +4581,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final Set<String> _selectedStudentKeys = {};
   late final AppSettingsStore _settingsStore =
       widget.settingsStore ?? SecureAppSettingsStore();
+  late final AppUpdateService _updateService =
+      widget.updateService ?? AppUpdateService();
 
   List<QueuedSheetAction> _offlineQueue = [];
   Timer? _offlineQueueRetryTimer;
@@ -4305,6 +4640,24 @@ class _HomeScreenState extends State<HomeScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _syncWithGoogleSheet();
       });
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _checkAutoUpdatesOnStartup();
+    });
+  }
+
+  Future<void> _checkAutoUpdatesOnStartup() async {
+    try {
+      final enabled = await _settingsStore.readAutoCheckUpdates();
+      if (!enabled) return;
+      final info =
+          await _updateService.checkForUpdates(currentVersion: kAppVersion);
+      if (info.hasUpdate && mounted) {
+        await showAppUpdateDialog(context, info);
+      }
+    } catch (_) {
+      // Silent catch on app startup if offline or failed
     }
   }
 
@@ -4854,7 +5207,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _SettingsHubSheet(
+      builder: (_) => SettingsHubSheet(
         themeMode: widget.themeMode,
         onThemeModeChanged: _changeThemeMode,
         isSheetConnected: widget.sheetConfig.isNotEmpty,
@@ -4863,6 +5216,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onBiometricChanged: widget.onBiometricChanged,
         students: _students,
         settingsStore: _settingsStore,
+        updateService: _updateService,
       ),
     );
     if (!mounted || action == null) return;
@@ -8362,8 +8716,8 @@ class _LeadReportsSheet extends StatelessWidget {
   }
 }
 
-class _SettingsHubSheet extends StatefulWidget {
-  const _SettingsHubSheet({
+class SettingsHubSheet extends StatefulWidget {
+  const SettingsHubSheet({
     required this.themeMode,
     required this.onThemeModeChanged,
     required this.isSheetConnected,
@@ -8372,6 +8726,8 @@ class _SettingsHubSheet extends StatefulWidget {
     required this.onBiometricChanged,
     this.students = const [],
     this.settingsStore,
+    this.updateService,
+    super.key,
   });
 
   final ThemeMode themeMode;
@@ -8382,23 +8738,65 @@ class _SettingsHubSheet extends StatefulWidget {
   final Future<void> Function(bool) onBiometricChanged;
   final List<Student> students;
   final AppSettingsStore? settingsStore;
+  final AppUpdateService? updateService;
 
   @override
-  State<_SettingsHubSheet> createState() => _SettingsHubSheetState();
+  State<SettingsHubSheet> createState() => _SettingsHubSheetState();
 }
 
-class _SettingsHubSheetState extends State<_SettingsHubSheet> {
+class _SettingsHubSheetState extends State<SettingsHubSheet> {
   bool _callerIdEnabled = true;
   bool _hasOverlayPermission = false;
   bool _hasPhonePermissions = false;
   int _cachedCount = 0;
   String _geminiApiKey = '';
+  bool _autoCheckUpdates = true;
+  bool _isCheckingUpdate = false;
 
   @override
   void initState() {
     super.initState();
     _loadCallerIdState();
     _loadGeminiState();
+    _loadUpdateState();
+  }
+
+  Future<void> _loadUpdateState() async {
+    final enabled = await widget.settingsStore?.readAutoCheckUpdates() ?? true;
+    if (mounted) {
+      setState(() => _autoCheckUpdates = enabled);
+    }
+  }
+
+  Future<void> _checkForUpdatesManually() async {
+    setState(() => _isCheckingUpdate = true);
+    try {
+      final info = await (widget.updateService ?? AppUpdateService())
+          .checkForUpdates(currentVersion: kAppVersion);
+      if (!mounted) return;
+      if (info.hasUpdate) {
+        await showAppUpdateDialog(context, info);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('LeadPilot is up to date (v$kAppVersion).'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not check for updates: $e'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isCheckingUpdate = false);
+      }
+    }
   }
 
   Future<void> _loadGeminiState() async {
@@ -8861,11 +9259,66 @@ class _SettingsHubSheetState extends State<_SettingsHubSheet> {
                 ),
               ),
               const SizedBox(height: 16),
+              Text(
+                'App Updates',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Card(
+                color: theme.colorScheme.surfaceContainerLow,
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.system_update_rounded),
+                      title: const Text('Check for Updates'),
+                      subtitle: Text(
+                        _isCheckingUpdate
+                            ? 'Checking GitHub for updates...'
+                            : 'Current version: v$kAppVersion',
+                      ),
+                      trailing: _isCheckingUpdate
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : FilledButton.tonal(
+                              key: const Key('check_updates_button'),
+                              onPressed: _checkForUpdatesManually,
+                              child: const Text('Check'),
+                            ),
+                      onTap: _isCheckingUpdate ? null : _checkForUpdatesManually,
+                    ),
+                    Divider(
+                      height: 1,
+                      indent: 56,
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                    SwitchListTile(
+                      key: const Key('auto_check_updates_switch'),
+                      secondary: const Icon(Icons.autorenew_rounded),
+                      title: const Text('Auto-check on Startup'),
+                      subtitle: const Text(
+                        'Automatically check for new releases when app opens',
+                      ),
+                      value: _autoCheckUpdates,
+                      onChanged: (val) async {
+                        setState(() => _autoCheckUpdates = val);
+                        await widget.settingsStore?.saveAutoCheckUpdates(val);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'LeadPilot v1.16.2',
+                    'LeadPilot v$kAppVersion',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                       fontWeight: FontWeight.w600,
