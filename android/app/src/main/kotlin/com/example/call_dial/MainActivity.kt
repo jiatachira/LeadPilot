@@ -21,10 +21,13 @@ import java.io.File
 class MainActivity : FlutterFragmentActivity() {
     private val ringtoneChannelName = "com.example.call_dial/ringtone"
     private val callerIdChannelName = "com.example.call_dial/caller_id"
+    private val speechChannelName = "com.example.call_dial/speech"
     private var ringtone: Ringtone? = null
 
     private var pendingPhonePermissionResult: MethodChannel.Result? = null
     private val phonePermissionRequestCode = 2001
+    private var pendingSpeechResult: MethodChannel.Result? = null
+    private val speechRecognitionRequestCode = 3001
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -239,6 +242,55 @@ class MainActivity : FlutterFragmentActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // Speech Recognition Channel (Native Google Speech Dialog)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, speechChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isRecognitionAvailable" -> {
+                        try {
+                            val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                            val activities = packageManager.queryIntentActivities(intent, 0)
+                            result.success(activities.isNotEmpty())
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
+                    "recognizeSpeech" -> {
+                        try {
+                            val prompt = call.argument<String>("prompt") ?: "Speak your call remark..."
+                            val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                putExtra(
+                                    android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                                    android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                                )
+                                putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, prompt)
+                                putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                            }
+                            pendingSpeechResult = result
+                            startActivityForResult(intent, speechRecognitionRequestCode)
+                        } catch (e: Exception) {
+                            pendingSpeechResult = null
+                            result.error("SPEECH_ERROR", e.message, null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == speechRecognitionRequestCode) {
+            if (resultCode == RESULT_OK && data != null) {
+                val results = data.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+                val spokenText = results?.firstOrNull() ?: ""
+                pendingSpeechResult?.success(spokenText)
+            } else {
+                pendingSpeechResult?.success("")
+            }
+            pendingSpeechResult = null
+        }
     }
 
     private fun checkHasPhonePermissions(): Boolean {

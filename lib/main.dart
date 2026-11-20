@@ -21,7 +21,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.18.0';
+const String kAppVersion = '1.18.1';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -4394,16 +4394,20 @@ class DefaultVoiceToTextService implements VoiceToTextService {
       : _speech = speech ?? stt.SpeechToText();
 
   final stt.SpeechToText _speech;
+  static const _nativeSpeechChannel =
+      MethodChannel('com.example.call_dial/speech');
   bool _initialized = false;
+  bool _isNativeListening = false;
 
   @override
   bool get isAvailable => _speech.isAvailable;
 
   @override
-  bool get isListening => _speech.isListening;
+  bool get isListening => _isNativeListening || _speech.isListening;
 
   @override
   Future<bool> initialize() async {
+    if (Platform.isAndroid) return true;
     if (_initialized && _speech.isAvailable) return true;
     try {
       _initialized = await _speech.initialize(
@@ -4424,6 +4428,29 @@ class DefaultVoiceToTextService implements VoiceToTextService {
     void Function(String error)? onError,
     String? localeId,
   }) async {
+    // 1. Try Native Android Speech Recognizer (Google Speech Dialog) first
+    if (Platform.isAndroid) {
+      try {
+        _isNativeListening = true;
+        onStatus?.call('listening');
+        final spoken = await _nativeSpeechChannel.invokeMethod<String>(
+          'recognizeSpeech',
+          {'prompt': 'Speak call remark (Sinhala or English)...'},
+        );
+        _isNativeListening = false;
+        onStatus?.call('notListening');
+        if (spoken != null && spoken.trim().isNotEmpty) {
+          onResult(spoken.trim());
+        }
+        return;
+      } catch (e) {
+        _isNativeListening = false;
+        onStatus?.call('notListening');
+        debugPrint('Native speech recognition fallback: $e');
+      }
+    }
+
+    // 2. In-app SpeechToText fallback
     final available = await initialize();
     if (!available) {
       onError?.call(
@@ -4435,7 +4462,9 @@ class DefaultVoiceToTextService implements VoiceToTextService {
     try {
       await _speech.listen(
         onResult: (result) {
-          onResult(result.recognizedWords);
+          if (result.recognizedWords.isNotEmpty) {
+            onResult(result.recognizedWords);
+          }
         },
         listenOptions: stt.SpeechListenOptions(
           listenMode: stt.ListenMode.dictation,
@@ -4453,6 +4482,7 @@ class DefaultVoiceToTextService implements VoiceToTextService {
 
   @override
   Future<void> stop() async {
+    _isNativeListening = false;
     try {
       await _speech.stop();
     } catch (_) {}
@@ -4460,6 +4490,7 @@ class DefaultVoiceToTextService implements VoiceToTextService {
 
   @override
   Future<void> cancel() async {
+    _isNativeListening = false;
     try {
       await _speech.cancel();
     } catch (_) {}
@@ -6971,9 +7002,10 @@ class _StudentHistoryDialogState extends State<StudentHistoryDialog> {
             setDialogState(() => isListeningVoice = true);
             await voiceService.listen(
               onResult: (words) {
+                if (words.trim().isEmpty) return;
                 setDialogState(() {
                   final p = preVoiceText.trim();
-                  controller.text = p.isEmpty ? words : '$p $words';
+                  controller.text = p.isEmpty ? words.trim() : '$p ${words.trim()}';
                   controller.selection = TextSelection.fromPosition(
                     TextPosition(offset: controller.text.length),
                   );
@@ -8476,13 +8508,13 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
 
     await _voiceService.listen(
       onResult: (words) {
-        if (!mounted) return;
+        if (!mounted || words.trim().isEmpty) return;
         setState(() {
           final prefix = _preVoiceText.trim();
           if (prefix.isEmpty) {
-            _commentController.text = words;
+            _commentController.text = words.trim();
           } else {
-            _commentController.text = '$prefix $words';
+            _commentController.text = '$prefix ${words.trim()}';
           }
           _commentController.selection = TextSelection.fromPosition(
             TextPosition(offset: _commentController.text.length),

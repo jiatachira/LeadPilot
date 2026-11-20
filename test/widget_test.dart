@@ -2308,7 +2308,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.18.0'), findsOneWidget);
+    expect(find.text('LeadPilot v1.18.1'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -3471,10 +3471,10 @@ void main() {
       client: MockClient((request) async {
         return http.Response(
           jsonEncode({
-            'tag_name': 'v1.18.0',
-            'name': 'LeadPilot v1.18.0',
+            'tag_name': 'v1.18.1',
+            'name': 'LeadPilot v1.18.1',
             'body': 'Current release',
-            'html_url': 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.18.0',
+            'html_url': 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.18.1',
             'assets': [],
           }),
           200,
@@ -3523,7 +3523,7 @@ void main() {
     await tester.tap(checkBtn);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
-    expect(find.text('LeadPilot is up to date (v1.18.0).'), findsOneWidget);
+    expect(find.text('LeadPilot is up to date (v1.18.1).'), findsOneWidget);
 
     // Toggle Auto-check
     final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
