@@ -2258,7 +2258,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.17.0'), findsOneWidget);
+    expect(find.text('LeadPilot v1.17.1'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -3275,10 +3275,10 @@ void main() {
       client: MockClient((request) async {
         return http.Response(
           jsonEncode({
-            'tag_name': 'v1.17.0',
-            'name': 'LeadPilot v1.17.0',
+            'tag_name': 'v1.17.1',
+            'name': 'LeadPilot v1.17.1',
             'body': 'Current release',
-            'html_url': 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.17.0',
+            'html_url': 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.17.1',
             'assets': [],
           }),
           200,
@@ -3327,12 +3327,139 @@ void main() {
     await tester.tap(checkBtn);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
-    expect(find.text('LeadPilot is up to date (v1.17.0).'), findsOneWidget);
+    expect(find.text('LeadPilot is up to date (v1.17.1).'), findsOneWidget);
 
     // Toggle Auto-check
     final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
     await tester.tap(switchFinder);
     await tester.pump();
     expect(await store.readAutoCheckUpdates(), isFalse);
+  });
+
+  test('formatStudentHistoryForPrompt includes all chronological call attempts, dates, and statuses', () {
+    const studentWithHistory = Student(
+      name: 'Nimal Silva',
+      phone: '0779988776',
+      callStatus: 'Follow-up',
+      comment: 'Wants evening callback',
+      attempts: [
+        CallAttempt(
+          dateTime: '2026-11-10 10:30 AM',
+          status: 'No Answer',
+          comment: 'Ringing, no response',
+        ),
+        CallAttempt(
+          dateTime: '2026-11-12 02:15 PM',
+          status: 'Connected',
+          comment: 'Spoke with mother; student is doing 2026 A/L Maths',
+        ),
+      ],
+      commentHistory: [
+        '2026-11-08 — Web form lead received',
+      ],
+    );
+
+    final historyText = formatStudentHistoryForPrompt(studentWithHistory);
+
+    expect(historyText, contains('2026-11-08'));
+    expect(historyText, contains('Web form lead received'));
+    expect(historyText, contains('2026-11-10 10:30 AM'));
+    expect(historyText, contains('No Answer'));
+    expect(historyText, contains('Ringing, no response'));
+    expect(historyText, contains('2026-11-12 02:15 PM'));
+    expect(historyText, contains('Connected'));
+    expect(historyText, contains('Spoke with mother'));
+  });
+
+  test('GeminiService sends complete chronological call history with dates and statuses in prompt', () async {
+    String capturedPrompt = '';
+    final mockClient = MockClient((request) async {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      capturedPrompt = body['contents'][0]['parts'][0]['text'] as String;
+      return http.Response(
+        jsonEncode({
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {'text': 'Hi Nimal! Following up from LNBTI.'}
+                ]
+              }
+            }
+          ]
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
+    final service = GeminiService(client: mockClient);
+    const student = Student(
+      name: 'Nimal Silva',
+      phone: '0779988776',
+      callStatus: 'Interested',
+      attempts: [
+        CallAttempt(
+          dateTime: '2026-11-14 09:00 AM',
+          status: 'No Answer',
+          comment: 'Line busy',
+        ),
+        CallAttempt(
+          dateTime: '2026-11-16 03:30 PM',
+          status: 'Interested',
+          comment: 'Asked for Software Engineering degree fees and Japanese classes',
+        ),
+      ],
+    );
+
+    await service.generateFollowUp(
+      apiKey: 'test_key',
+      student: student,
+      language: 'English',
+    );
+
+    expect(capturedPrompt, contains('Complete Call & Interaction History (Chronological):'));
+    expect(capturedPrompt, contains('2026-11-14 09:00 AM'));
+    expect(capturedPrompt, contains('Line busy'));
+    expect(capturedPrompt, contains('2026-11-16 03:30 PM'));
+    expect(capturedPrompt, contains('Software Engineering degree fees and Japanese classes'));
+    expect(capturedPrompt, contains('USE OF COMPLETE CALL HISTORY'));
+  });
+
+  testWidgets('GeminiAiMessageSheet displays past interactions count analyzed by AI', (tester) async {
+    final store = MemoryAppSettingsStore();
+    const student = Student(
+      name: 'Saman Kumara',
+      phone: '0712345678',
+      callStatus: 'Interested',
+      attempts: [
+        CallAttempt(
+          dateTime: '2026-11-15 10:00 AM',
+          status: 'No Answer',
+          comment: 'No reply',
+        ),
+        CallAttempt(
+          dateTime: '2026-11-18 11:30 AM',
+          status: 'Interested',
+          comment: 'Requested brochure',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: GeminiAiMessageSheet(
+            student: student,
+            initialApiKey: 'test_api_key',
+            settingsStore: store,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('2 past interaction(s) analyzed by AI'), findsOneWidget);
+    expect(find.textContaining('Requested brochure'), findsOneWidget);
   });
 }

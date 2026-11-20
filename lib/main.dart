@@ -20,7 +20,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.17.0';
+const String kAppVersion = '1.17.1';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -3262,6 +3262,107 @@ String _formatFilterDate(DateTime? date) {
       '${date.day.toString().padLeft(2, '0')}';
 }
 
+typedef StudentHistoryEntry = ({
+  DateTime? date,
+  String dateLabel,
+  int order,
+  String status,
+  String text,
+});
+
+List<StudentHistoryEntry> buildStudentHistoryEntries(Student student) {
+  final entries = <StudentHistoryEntry>[];
+  final attemptCommentCounts = <String, int>{};
+  var order = 0;
+  for (final attempt in student.attempts) {
+    final date = DateTime.tryParse(attempt.dateTime);
+    final text = attempt.comment.trim();
+    if (text.isNotEmpty) {
+      attemptCommentCounts.update(
+        text,
+        (count) => count + 1,
+        ifAbsent: () => 1,
+      );
+    }
+    entries.add((
+      date: date,
+      dateLabel: date == null ? attempt.dateTime : _formatReminder(date),
+      order: order++,
+      status: attempt.status,
+      text: text,
+    ));
+  }
+
+  for (final entry in student.commentHistory) {
+    final separator = entry.indexOf(' — ');
+    final text = separator < 0
+        ? entry.trim()
+        : entry.substring(separator + 3).trim();
+    if (text.isEmpty) continue;
+    final duplicateCount = attemptCommentCounts[text] ?? 0;
+    if (duplicateCount > 0) {
+      attemptCommentCounts[text] = duplicateCount - 1;
+      continue;
+    }
+    final dateLabel = separator < 0 ? '' : entry.substring(0, separator);
+    final date = dateLabel.length >= 10
+        ? DateTime.tryParse(dateLabel.substring(0, 10))
+        : null;
+    entries.add((
+      date: date,
+      dateLabel: dateLabel,
+      order: order++,
+      status: '',
+      text: text,
+    ));
+  }
+  final currentComment = student.comment.trim();
+  if (currentComment.isNotEmpty &&
+      !entries.any((entry) => entry.text == currentComment)) {
+    entries.add((
+      date: null,
+      dateLabel: '',
+      order: order++,
+      status: student.callStatus,
+      text: currentComment,
+    ));
+  }
+  entries.sort((left, right) {
+    if (left.date == null && right.date != null) return 1;
+    if (right.date == null && left.date != null) return -1;
+    final dateComparison = left.date?.compareTo(right.date!) ?? 0;
+    return dateComparison != 0
+        ? dateComparison
+        : left.order.compareTo(right.order);
+  });
+  return entries;
+}
+
+String formatStudentHistoryForPrompt(Student student) {
+  final entries = buildStudentHistoryEntries(student);
+  if (entries.isEmpty) {
+    return 'No previous call attempts or historical comments recorded yet.';
+  }
+
+  final buffer = StringBuffer();
+  for (var i = 0; i < entries.length; i++) {
+    final entry = entries[i];
+    final dateStr = entry.dateLabel.isNotEmpty
+        ? entry.dateLabel
+        : (entry.date != null
+            ? _formatReminder(entry.date!)
+            : 'Date not recorded');
+    final statusStr =
+        entry.status.trim().isNotEmpty ? entry.status.trim() : 'Note';
+    final commentStr =
+        entry.text.trim().isNotEmpty ? entry.text.trim() : '(No remark written)';
+    buffer.writeln(
+      '${i + 1}. [Date & Time: $dateStr] Call Status: "$statusStr" | Call Remark: "$commentStr"',
+    );
+  }
+  return buffer.toString().trim();
+}
+
 String studentsToCsv(List<Student> students) {
   const headers = [
     'Name',
@@ -4006,7 +4107,7 @@ CRITICAL RULES:
         ? companyDescription.trim()
         : _defaultCompanyDescription;
     final streak = studentActivityStatus(student).unansweredStreak;
-    final streakNote = streak >= 3
+    final streakNote = streak >= 2
         ? ' ($streak x consecutive unanswered attempts)'
         : '';
     final lastNote = student.comment.trim().isNotEmpty
@@ -4017,6 +4118,7 @@ CRITICAL RULES:
     final examDetails = [student.examType, student.examYear]
         .where((s) => s.trim().isNotEmpty)
         .join(' ');
+    final historySummary = formatStudentHistoryForPrompt(student);
 
     final goalText = customInstructions.trim().isNotEmpty
         ? customInstructions.trim()
@@ -4029,14 +4131,26 @@ Act as a warm, approachable, and respectful student advisor / counselor from LNB
 Target Student Details:
 - Student Name: ${student.name}
 - Stream/Class: ${examDetails.isNotEmpty ? examDetails : 'General Course'}
-- Call Status: ${student.callStatus}$streakNote
+- Current Call Status: ${student.callStatus}$streakNote
 - Recent Call Note/Comment: "$lastNote"
 - Location/Town: ${student.location.isNotEmpty ? student.location : 'Not specified'}
+- Scheduled Next Call: ${student.nextCallDateTime.isNotEmpty ? student.nextCallDateTime : 'None scheduled'}
 - Purpose of message: "$goalText"
 - Desired Language: $language
 
+Complete Call & Interaction History (Chronological):
+$historySummary
+
 CRITICAL GUIDELINES:
-1. TONE & MANNER (POLITE, RESPECTFUL & APPROACHABLE):
+1. USE OF COMPLETE CALL HISTORY (DEEP CONTEXTUAL AWARENESS):
+   - You MUST carefully read and understand the entire call history above to determine the context of this follow-up.
+   - Tailor the message to reflect past interactions accurately:
+     * If previous remarks mention specific inquiries (e.g. degree programs, Software Engineering / IT, course fees, Japanese language classes, scholarships, intake dates, or A/L results), naturally reference or address that topic.
+     * If the student previously asked for a callback, more time, or details to be sent, follow up warmly on that exact request.
+     * If there were multiple missed calls / no-answer attempts, politely mention that you tried calling earlier and want to check in gently without guilt-tripping or being pushy.
+     * Do NOT invent details that are not in the history, and do NOT recite the history like a robotic log. Weave the context naturally into a genuine human counselor message.
+
+2. TONE & MANNER (POLITE, RESPECTFUL & APPROACHABLE):
    - Maintain a warm, friendly, and respectful student counseling tone.
    - Balance natural conversational warmth with polite respect. Do NOT be overly stiff/robotic, and do NOT be overly casual/slangy.
    - STRICTLY FORBIDDEN PHRASES:
@@ -4044,19 +4158,19 @@ CRITICAL GUIDELINES:
      * NO overly casual buddy slang (strictly FORBIDDEN: "හොඳේ", "hode", "honde", "මචං", "machan", "හරිද", "harida", "onna"). Messages are sent to prospective students and must maintain courteous respect.
    - Start with a natural, polite greeting using their name (e.g., "හායි ${student.name}!", "කොහොමද ${student.name}?", "Hi ${student.name}! 👋").
 
-2. SENDER IDENTITY (LNBTI):
+3. SENDER IDENTITY (LNBTI):
    - Naturally mention LNBTI as an advisor would refer to their campus/team (e.g. "මම LNBTI එකෙන් කතා කරේ / මැසේජ් එකක් දැම්මේ", "LNBTI campus එකෙන්", "just checking in from LNBTI").
 
-3. CONCISENESS (DO NOT OVER-DETAIL):
+4. CONCISENESS (DO NOT OVER-DETAIL):
    - Keep it short, genuine, and light (2 to 3 sentences max).
    - Do NOT dump long course descriptions or heavy marketing text. Get straight to the point politely and leave room for them to reply easily.
 
-4. LANGUAGE & PHRASING:
+5. LANGUAGE & PHRASING:
    - If Language is "Sinhala": Use natural, polite conversational Sinhala (e.g. "පුළුවන් වෙලාවක මැසේජ් එකක් දාන්න හෝ කතා කරන්න", "විස්තර දැනගන්න ඕන නම් අහන්න", "කෝල් එකක් ගන්න බැලුවේ සම්බන්ධ කරගන්න බැරි වුණා"). Strictly do NOT use "හොඳේ".
    - If Language is "Singlish": Use clean, polite conversational Singlish (e.g. "Hi ${student.name}! kohomada? Mama LNBTI eken message kale. Call ekak ganna baluwe connect karaganna bari una. Puluwan welawaka message ekak danna hari call ekak denna 👍"). Strictly do NOT use "hode".
    - If Language is "English": Use warm, polite conversational English (e.g. "Hi ${student.name}! Hope you are doing well. Just checking in from LNBTI. Tried calling you earlier, but couldn't reach you. Please let me know when you're free! 😊").
 
-5. EMOJIS & FORMATTING:
+6. EMOJIS & FORMATTING:
    - Add 1-2 friendly, tasteful emojis (e.g. 👋, 😊, 👍).
    - Return ONLY the final ready-to-send text message. Do not include quotes, markdown code blocks, or introductory explanations.
 ''';
@@ -6314,80 +6428,8 @@ class _StudentHistoryDialogState extends State<StudentHistoryDialog> {
   late Student _currentStudent = widget.student;
   bool _isSaving = false;
 
-  List<({DateTime? date, String dateLabel, int order, String status, String text})>
-      _buildEntries(Student student) {
-    final entries = <({
-      DateTime? date,
-      String dateLabel,
-      int order,
-      String status,
-      String text,
-    })>[];
-    final attemptCommentCounts = <String, int>{};
-    var order = 0;
-    for (final attempt in student.attempts) {
-      final date = DateTime.tryParse(attempt.dateTime);
-      final text = attempt.comment.trim();
-      if (text.isNotEmpty) {
-        attemptCommentCounts.update(
-          text,
-          (count) => count + 1,
-          ifAbsent: () => 1,
-        );
-      }
-      entries.add((
-        date: date,
-        dateLabel: date == null ? attempt.dateTime : _formatReminder(date),
-        order: order++,
-        status: attempt.status,
-        text: text,
-      ));
-    }
-
-    for (final entry in student.commentHistory) {
-      final separator = entry.indexOf(' — ');
-      final text = separator < 0
-          ? entry.trim()
-          : entry.substring(separator + 3).trim();
-      if (text.isEmpty) continue;
-      final duplicateCount = attemptCommentCounts[text] ?? 0;
-      if (duplicateCount > 0) {
-        attemptCommentCounts[text] = duplicateCount - 1;
-        continue;
-      }
-      final dateLabel = separator < 0 ? '' : entry.substring(0, separator);
-      final date = dateLabel.length >= 10
-          ? DateTime.tryParse(dateLabel.substring(0, 10))
-          : null;
-      entries.add((
-        date: date,
-        dateLabel: dateLabel,
-        order: order++,
-        status: '',
-        text: text,
-      ));
-    }
-    final currentComment = student.comment.trim();
-    if (currentComment.isNotEmpty &&
-        !entries.any((entry) => entry.text == currentComment)) {
-      entries.add((
-        date: null,
-        dateLabel: '',
-        order: order++,
-        status: student.callStatus,
-        text: currentComment,
-      ));
-    }
-    entries.sort((left, right) {
-      if (left.date == null && right.date != null) return 1;
-      if (right.date == null && left.date != null) return -1;
-      final dateComparison = left.date?.compareTo(right.date!) ?? 0;
-      return dateComparison != 0
-          ? dateComparison
-          : left.order.compareTo(right.order);
-    });
-    return entries;
-  }
+  List<StudentHistoryEntry> _buildEntries(Student student) =>
+      buildStudentHistoryEntries(student);
 
   Future<void> _editLastRemark(String currentText) async {
     final controller = TextEditingController(text: currentText);
@@ -11279,11 +11321,41 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
                             ),
                           ],
                         ),
-                        if (widget.student.comment.trim().isNotEmpty ||
-                            widget.student.commentHistory.isNotEmpty) ...[
+                        if (buildStudentHistoryEntries(widget.student).isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.history_rounded,
+                                size: 14,
+                                color: Color(0xFF8B5CF6),
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  '${buildStudentHistoryEntries(widget.student).length} past interaction(s) analyzed by AI',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    color: const Color(0xFF8B5CF6),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Latest: "${buildStudentHistoryEntries(widget.student).last.text.isNotEmpty ? buildStudentHistoryEntries(widget.student).last.text : (widget.student.comment.isNotEmpty ? widget.student.comment : "No remark")}"',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontStyle: FontStyle.italic,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ] else if (widget.student.comment.trim().isNotEmpty) ...[
                           const SizedBox(height: 6),
                           Text(
-                            '💬 "${widget.student.comment.trim().isNotEmpty ? widget.student.comment.trim() : widget.student.commentHistory.last.trim()}"',
+                            '💬 "${widget.student.comment.trim()}"',
                             style: theme.textTheme.bodySmall?.copyWith(
                               fontStyle: FontStyle.italic,
                               color: theme.colorScheme.onSurfaceVariant,
