@@ -104,6 +104,56 @@ Future<void> openSheetSettings(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+class MockVoiceToTextService implements VoiceToTextService {
+  MockVoiceToTextService({
+    this.initialAvailable = true,
+    this.mockWords = 'student ekka katha kala degree fees ahuwa',
+  });
+
+  bool initialAvailable;
+  String mockWords;
+  bool _listening = false;
+  int listenCallCount = 0;
+  int stopCallCount = 0;
+
+  @override
+  bool get isAvailable => initialAvailable;
+
+  @override
+  bool get isListening => _listening;
+
+  @override
+  Future<bool> initialize() async => initialAvailable;
+
+  @override
+  Future<void> listen({
+    required void Function(String recognizedWords) onResult,
+    void Function(String status)? onStatus,
+    void Function(String error)? onError,
+    String? localeId,
+  }) async {
+    listenCallCount++;
+    if (!initialAvailable) {
+      onError?.call('Microphone permission denied');
+      return;
+    }
+    _listening = true;
+    onStatus?.call('listening');
+    onResult(mockWords);
+  }
+
+  @override
+  Future<void> stop() async {
+    stopCallCount++;
+    _listening = false;
+  }
+
+  @override
+  Future<void> cancel() async {
+    _listening = false;
+  }
+}
+
 void main() {
   test('builds a WhatsApp chat link for an unsaved Sri Lankan number', () {
     expect(
@@ -2258,7 +2308,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.17.2'), findsOneWidget);
+    expect(find.text('LeadPilot v1.18.0'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -3161,6 +3211,139 @@ void main() {
     expect(find.text('student kata kala se degree kamathi kiwwa hawasa call ganna'), findsOneWidget);
   });
 
+  testWidgets('EditStudentSheet supports voice-to-text dictation and seamless AI polish', (tester) async {
+    final mockVoice = MockVoiceToTextService(
+      mockWords: 'katha kala degree fees ahuwa',
+    );
+    final store = MemoryAppSettingsStore();
+    await store.saveGeminiApiKey('test_key');
+
+    final mockClient = MockClient((request) async {
+      return http.Response(
+        jsonEncode({
+          'candidates': [
+            {
+              'content': {
+                'parts': [
+                  {
+                    'text': 'Contacted student regarding degree fee structure.',
+                  }
+                ]
+              }
+            }
+          ]
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
+    final gemini = GeminiService(client: mockClient);
+    const student = Student(name: 'Sunil Silva', phone: '0771234567');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: EditStudentSheet(
+              student: student,
+              settingsStore: store,
+              geminiService: gemini,
+              voiceToTextService: mockVoice,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final voiceBtn = find.byKey(const Key('voice_to_text_button'));
+    final voiceSuffix = find.byKey(const Key('voice_to_text_suffix_button'));
+    expect(voiceBtn, findsOneWidget);
+    expect(voiceSuffix, findsOneWidget);
+    expect(find.text('🎙️ Speak'), findsOneWidget);
+
+    // 1. Tap Speak button
+    await tester.ensureVisible(voiceBtn);
+    await tester.tap(voiceBtn);
+    await tester.pump();
+
+    expect(mockVoice.listenCallCount, 1);
+    expect(find.text('katha kala degree fees ahuwa'), findsOneWidget);
+
+    // 2. Tap Polish button to polish the dictated speech
+    final polishBtn = find.byKey(const Key('polish_remark_button'));
+    await tester.ensureVisible(polishBtn);
+    await tester.tap(polishBtn);
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(find.text('Contacted student regarding degree fee structure.'), findsOneWidget);
+    expect(find.text('✨ Remark polished into clear English!'), findsOneWidget);
+  });
+
+  testWidgets('StudentHistoryDialog supports voice-to-text when editing last comment', (tester) async {
+    final mockVoice = MockVoiceToTextService(
+      mockWords: 'father will visit campus next week',
+    );
+    final store = MemoryAppSettingsStore();
+
+    Student student = const Student(
+      name: 'Kamal Gunawardena',
+      phone: '0719876543',
+      commentHistory: ['2026-11-18 10:00: Initial call made'],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (_) => StudentHistoryDialog(
+                  student: student,
+                  title: 'History',
+                  settingsStore: store,
+                  voiceToTextService: mockVoice,
+                  onStudentUpdated: (updated) async {
+                    student = updated;
+                  },
+                ),
+              ),
+              child: const Text('Open History'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open History'));
+    await tester.pumpAndSettle();
+
+    final editBtn = find.text('Edit last remark');
+    expect(editBtn, findsOneWidget);
+    await tester.tap(editBtn);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit Last Remark'), findsOneWidget);
+
+    final speakBtn = find.text('🎙️ Speak');
+    expect(speakBtn, findsOneWidget);
+    await tester.tap(speakBtn);
+    await tester.pump();
+
+    expect(mockVoice.listenCallCount, 1);
+    expect(find.text('2026-11-18 10:00: Initial call made father will visit campus next week'), findsOneWidget);
+
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(student.commentHistory.last, contains('father will visit campus next week'));
+  });
+
   test('AppUpdateService.compareVersions compares semantic versions accurately', () {
     expect(AppUpdateService.compareVersions('1.16.2', '1.17.0'), 1);
     expect(AppUpdateService.compareVersions('1.17.0', '1.16.2'), -1);
@@ -3288,10 +3471,10 @@ void main() {
       client: MockClient((request) async {
         return http.Response(
           jsonEncode({
-            'tag_name': 'v1.17.2',
-            'name': 'LeadPilot v1.17.2',
+            'tag_name': 'v1.18.0',
+            'name': 'LeadPilot v1.18.0',
             'body': 'Current release',
-            'html_url': 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.17.2',
+            'html_url': 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.18.0',
             'assets': [],
           }),
           200,
@@ -3340,7 +3523,7 @@ void main() {
     await tester.tap(checkBtn);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
-    expect(find.text('LeadPilot is up to date (v1.17.2).'), findsOneWidget);
+    expect(find.text('LeadPilot is up to date (v1.18.0).'), findsOneWidget);
 
     // Toggle Auto-check
     final switchFinder = find.byKey(const Key('auto_check_updates_switch'));

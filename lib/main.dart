@@ -12,6 +12,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:local_auth/local_auth.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:timezone/data/latest.dart' as timezone_data;
 import 'package:timezone/timezone.dart' as timezone;
 import 'package:url_launcher/url_launcher.dart';
@@ -20,7 +21,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.17.2';
+const String kAppVersion = '1.18.0';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -4374,6 +4375,97 @@ class AppUpdateInfo {
   final int apkSize;
 }
 
+abstract class VoiceToTextService {
+  bool get isAvailable;
+  bool get isListening;
+  Future<bool> initialize();
+  Future<void> listen({
+    required void Function(String recognizedWords) onResult,
+    void Function(String status)? onStatus,
+    void Function(String error)? onError,
+    String? localeId,
+  });
+  Future<void> stop();
+  Future<void> cancel();
+}
+
+class DefaultVoiceToTextService implements VoiceToTextService {
+  DefaultVoiceToTextService({stt.SpeechToText? speech})
+      : _speech = speech ?? stt.SpeechToText();
+
+  final stt.SpeechToText _speech;
+  bool _initialized = false;
+
+  @override
+  bool get isAvailable => _speech.isAvailable;
+
+  @override
+  bool get isListening => _speech.isListening;
+
+  @override
+  Future<bool> initialize() async {
+    if (_initialized && _speech.isAvailable) return true;
+    try {
+      _initialized = await _speech.initialize(
+        onError: (err) => debugPrint('SpeechToText error: ${err.errorMsg}'),
+        onStatus: (status) => debugPrint('SpeechToText status: $status'),
+      );
+      return _initialized;
+    } catch (e) {
+      debugPrint('SpeechToText init exception: $e');
+      return false;
+    }
+  }
+
+  @override
+  Future<void> listen({
+    required void Function(String recognizedWords) onResult,
+    void Function(String status)? onStatus,
+    void Function(String error)? onError,
+    String? localeId,
+  }) async {
+    final available = await initialize();
+    if (!available) {
+      onError?.call(
+        'Microphone permission or speech recognition is not available.',
+      );
+      return;
+    }
+
+    try {
+      await _speech.listen(
+        onResult: (result) {
+          onResult(result.recognizedWords);
+        },
+        listenOptions: stt.SpeechListenOptions(
+          listenMode: stt.ListenMode.dictation,
+          cancelOnError: false,
+          partialResults: true,
+          listenFor: const Duration(seconds: 60),
+          pauseFor: const Duration(seconds: 4),
+          localeId: localeId,
+        ),
+      );
+    } catch (e) {
+      onError?.call(e.toString());
+    }
+  }
+
+  @override
+  Future<void> stop() async {
+    try {
+      await _speech.stop();
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> cancel() async {
+    try {
+      await _speech.cancel();
+    } catch (_) {}
+  }
+}
+
 class AppUpdateService {
   AppUpdateService({
     http.Client? client,
@@ -6813,6 +6905,7 @@ Future<void> _showStudentHistory(
   Future<void> Function(Student updatedStudent)? onStudentUpdated,
   AppSettingsStore? settingsStore,
   GeminiService? geminiService,
+  VoiceToTextService? voiceToTextService,
 }) {
   return showDialog<void>(
     context: context,
@@ -6822,6 +6915,7 @@ Future<void> _showStudentHistory(
       onStudentUpdated: onStudentUpdated,
       settingsStore: settingsStore,
       geminiService: geminiService,
+      voiceToTextService: voiceToTextService,
     ),
   );
 }
@@ -6834,6 +6928,7 @@ class StudentHistoryDialog extends StatefulWidget {
     this.onStudentUpdated,
     this.settingsStore,
     this.geminiService,
+    this.voiceToTextService,
   });
 
   final Student student;
@@ -6841,6 +6936,7 @@ class StudentHistoryDialog extends StatefulWidget {
   final Future<void> Function(Student updatedStudent)? onStudentUpdated;
   final AppSettingsStore? settingsStore;
   final GeminiService? geminiService;
+  final VoiceToTextService? voiceToTextService;
 
   @override
   State<StudentHistoryDialog> createState() => _StudentHistoryDialogState();
@@ -6856,11 +6952,44 @@ class _StudentHistoryDialogState extends State<StudentHistoryDialog> {
   Future<void> _editLastRemark(String currentText) async {
     final controller = TextEditingController(text: currentText);
     bool isPolishing = false;
+    bool isListeningVoice = false;
+    String preVoiceText = '';
+    final voiceService =
+        widget.voiceToTextService ?? DefaultVoiceToTextService();
 
     final updatedText = await showDialog<String>(
       context: context,
       builder: (dialogCtx) => StatefulBuilder(
         builder: (context, setDialogState) {
+          Future<void> toggleVoice() async {
+            if (isListeningVoice) {
+              await voiceService.stop();
+              setDialogState(() => isListeningVoice = false);
+              return;
+            }
+            preVoiceText = controller.text;
+            setDialogState(() => isListeningVoice = true);
+            await voiceService.listen(
+              onResult: (words) {
+                setDialogState(() {
+                  final p = preVoiceText.trim();
+                  controller.text = p.isEmpty ? words : '$p $words';
+                  controller.selection = TextSelection.fromPosition(
+                    TextPosition(offset: controller.text.length),
+                  );
+                });
+              },
+              onStatus: (st) {
+                if (st == 'notListening' || st == 'done') {
+                  setDialogState(() => isListeningVoice = false);
+                }
+              },
+              onError: (err) {
+                setDialogState(() => isListeningVoice = false);
+              },
+            );
+          }
+
           return AlertDialog(
             title: const Row(
               children: [
@@ -6887,95 +7016,185 @@ class _StudentHistoryDialogState extends State<StudentHistoryDialog> {
                     minLines: 2,
                     maxLines: 4,
                     autofocus: true,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Remark / Comment',
                       alignLabelWithHint: true,
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        tooltip: isListeningVoice
+                            ? 'Stop listening'
+                            : 'Voice to text (Speak)',
+                        icon: Icon(
+                          isListeningVoice
+                              ? Icons.mic_rounded
+                              : Icons.mic_none_rounded,
+                          color: isListeningVoice
+                              ? Colors.redAccent
+                              : const Color(0xFF00966D),
+                        ),
+                        onPressed: toggleVoice,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        foregroundColor: const Color(0xFF8B5CF6),
-                        side: BorderSide(
-                          color: const Color(0xFF8B5CF6).withValues(alpha: 0.6),
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
-                      onPressed: isPolishing
-                          ? null
-                          : () async {
-                              final raw = controller.text.trim();
-                              if (raw.isEmpty) return;
-                              final store = widget.settingsStore ??
-                                  SecureAppSettingsStore();
-                              final apiKey = await store.readGeminiApiKey();
-                              if (apiKey.trim().isEmpty) {
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Please configure Gemini API key in Settings.',
-                                      ),
-                                      duration: Duration(seconds: 3),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      if (isListeningVoice)
+                        const Row(
+                          children: [
+                            Icon(
+                              Icons.fiber_manual_record,
+                              color: Colors.redAccent,
+                              size: 10,
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              'Listening...',
+                              style: TextStyle(
+                                color: Colors.redAccent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        )
+                      else
+                        const SizedBox.shrink(),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              foregroundColor: isListeningVoice
+                                  ? Colors.redAccent
+                                  : const Color(0xFF00966D),
+                              side: BorderSide(
+                                color: isListeningVoice
+                                    ? Colors.redAccent
+                                    : const Color(0xFF00966D)
+                                        .withValues(alpha: 0.6),
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            onPressed: toggleVoice,
+                            icon: Icon(
+                              isListeningVoice
+                                  ? Icons.stop_rounded
+                                  : Icons.mic_rounded,
+                              size: 13,
+                            ),
+                            label: Text(
+                              isListeningVoice ? 'Stop' : '🎙️ Speak',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              foregroundColor: const Color(0xFF8B5CF6),
+                              side: BorderSide(
+                                color: const Color(0xFF8B5CF6)
+                                    .withValues(alpha: 0.6),
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            onPressed: isPolishing
+                                ? null
+                                : () async {
+                                    final raw = controller.text.trim();
+                                    if (raw.isEmpty) return;
+                                    final store = widget.settingsStore ??
+                                        SecureAppSettingsStore();
+                                    final apiKey =
+                                        await store.readGeminiApiKey();
+                                    if (apiKey.trim().isEmpty) {
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'Please configure Gemini API key in Settings.',
+                                            ),
+                                            duration: Duration(seconds: 3),
+                                          ),
+                                        );
+                                      }
+                                      return;
+                                    }
+                                    setDialogState(() => isPolishing = true);
+                                    try {
+                                      final service = widget.geminiService ??
+                                          GeminiService();
+                                      final model =
+                                          await store.readGeminiModel();
+                                      final polished =
+                                          await service.polishRemark(
+                                        apiKey: apiKey,
+                                        rawRemark: raw,
+                                        model: model,
+                                      );
+                                      if (polished.isNotEmpty) {
+                                        controller.text = polished;
+                                        controller.selection =
+                                            TextSelection.fromPosition(
+                                          TextPosition(offset: polished.length),
+                                        );
+                                      }
+                                    } catch (e) {
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          SnackBar(
+                                            content:
+                                                Text('Could not polish: $e'),
+                                          ),
+                                        );
+                                      }
+                                    } finally {
+                                      setDialogState(() => isPolishing = false);
+                                    }
+                                  },
+                            icon: isPolishing
+                                ? const SizedBox(
+                                    width: 12,
+                                    height: 12,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
                                     ),
-                                  );
-                                }
-                                return;
-                              }
-                              setDialogState(() => isPolishing = true);
-                              try {
-                                final service =
-                                    widget.geminiService ?? GeminiService();
-                                final model = await store.readGeminiModel();
-                                final polished = await service.polishRemark(
-                                  apiKey: apiKey,
-                                  rawRemark: raw,
-                                  model: model,
-                                );
-                                if (polished.isNotEmpty) {
-                                  controller.text = polished;
-                                  controller.selection =
-                                      TextSelection.fromPosition(
-                                    TextPosition(offset: polished.length),
-                                  );
-                                }
-                              } catch (e) {
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Could not polish: $e'),
-                                    ),
-                                  );
-                                }
-                              } finally {
-                                setDialogState(() => isPolishing = false);
-                              }
-                            },
-                      icon: isPolishing
-                          ? const SizedBox(
-                              width: 12,
-                              height: 12,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.auto_awesome_rounded, size: 14),
-                      label: Text(
-                        isPolishing ? 'Polishing...' : '✨ Polish (AI)',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
+                                  )
+                                : const Icon(
+                                    Icons.auto_awesome_rounded,
+                                    size: 14,
+                                  ),
+                            label: Text(
+                              isPolishing ? 'Polishing...' : '✨ Polish',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
+                    ],
                   ),
                 ],
               ),
@@ -7976,11 +8195,13 @@ class EditStudentSheet extends StatefulWidget {
     required this.student,
     this.settingsStore,
     this.geminiService,
+    this.voiceToTextService,
   });
 
   final Student student;
   final AppSettingsStore? settingsStore;
   final GeminiService? geminiService;
+  final VoiceToTextService? voiceToTextService;
 
   @override
   State<EditStudentSheet> createState() => _EditStudentSheetState();
@@ -7994,7 +8215,11 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
       widget.settingsStore ?? SecureAppSettingsStore();
   late final GeminiService _geminiService =
       widget.geminiService ?? GeminiService();
+  late final VoiceToTextService _voiceService =
+      widget.voiceToTextService ?? DefaultVoiceToTextService();
   bool _isPolishing = false;
+  bool _isListeningVoice = false;
+  String _preVoiceText = '';
   late Student _activeStudent = widget.student;
 
   late final _nameController = TextEditingController(text: widget.student.name);
@@ -8058,6 +8283,9 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
 
   @override
   void dispose() {
+    if (_isListeningVoice) {
+      _voiceService.stop();
+    }
     _nameController.dispose();
     _phoneController.dispose();
     _examYearController.dispose();
@@ -8228,12 +8456,60 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
     title: 'Call attempt history',
     settingsStore: _settingsStore,
     geminiService: _geminiService,
+    voiceToTextService: _voiceService,
     onStudentUpdated: (updated) async {
       setState(() {
         _activeStudent = updated;
       });
     },
   );
+
+  Future<void> _toggleVoice() async {
+    if (_isListeningVoice) {
+      await _voiceService.stop();
+      if (mounted) setState(() => _isListeningVoice = false);
+      return;
+    }
+
+    _preVoiceText = _commentController.text;
+    setState(() => _isListeningVoice = true);
+
+    await _voiceService.listen(
+      onResult: (words) {
+        if (!mounted) return;
+        setState(() {
+          final prefix = _preVoiceText.trim();
+          if (prefix.isEmpty) {
+            _commentController.text = words;
+          } else {
+            _commentController.text = '$prefix $words';
+          }
+          _commentController.selection = TextSelection.fromPosition(
+            TextPosition(offset: _commentController.text.length),
+          );
+        });
+      },
+      onStatus: (status) {
+        if (!mounted) return;
+        if (status == 'notListening' || status == 'done') {
+          setState(() => _isListeningVoice = false);
+        }
+      },
+      onError: (err) {
+        if (!mounted) return;
+        setState(() => _isListeningVoice = false);
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        messenger?.removeCurrentSnackBar();
+        messenger?.showSnackBar(
+          SnackBar(
+            content: Text('Voice input: $err'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      },
+    );
+  }
 
   Future<void> _polishRemarkWithAi() async {
     final rawRemark = _commentController.text.trim();
@@ -8674,12 +8950,27 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
                   controller: _commentController,
                   minLines: 2,
                   maxLines: 4,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Call remark (optional)',
                     alignLabelWithHint: true,
-                    prefixIcon: Padding(
+                    prefixIcon: const Padding(
                       padding: EdgeInsets.only(bottom: 24),
                       child: Icon(Icons.notes_outlined),
+                    ),
+                    suffixIcon: IconButton(
+                      key: const Key('voice_to_text_suffix_button'),
+                      tooltip: _isListeningVoice
+                          ? 'Stop listening'
+                          : 'Voice to text (Speak remark)',
+                      icon: Icon(
+                        _isListeningVoice
+                            ? Icons.mic_rounded
+                            : Icons.mic_none_rounded,
+                        color: _isListeningVoice
+                            ? Colors.redAccent
+                            : const Color(0xFF00966D),
+                      ),
+                      onPressed: _toggleVoice,
                     ),
                   ),
                 ),
@@ -8688,23 +8979,92 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Expanded(
-                      child: Text(
-                        'Draft in Sinhala, Singlish, or rough English',
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurfaceVariant
-                              .withValues(alpha: 0.7),
-                          fontSize: 11,
+                      child: _isListeningVoice
+                          ? Row(
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.redAccent,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    'Listening... Speak in Sinhala or English',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          color: Colors.redAccent,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 11,
+                                        ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            )
+                          : Text(
+                              'Draft in Sinhala, Singlish, or rough English',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant
+                                        .withValues(alpha: 0.7),
+                                    fontSize: 11,
+                                  ),
+                            ),
+                    ),
+                    const SizedBox(width: 6),
+                    OutlinedButton.icon(
+                      key: const Key('voice_to_text_button'),
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        foregroundColor: _isListeningVoice
+                            ? Colors.redAccent
+                            : const Color(0xFF00966D),
+                        side: BorderSide(
+                          color: _isListeningVoice
+                              ? Colors.redAccent
+                              : const Color(0xFF00966D).withValues(alpha: 0.6),
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                      onPressed: _toggleVoice,
+                      icon: Icon(
+                        _isListeningVoice
+                            ? Icons.stop_circle_rounded
+                            : Icons.mic_rounded,
+                        size: 14,
+                      ),
+                      label: Text(
+                        _isListeningVoice ? 'Stop' : '🎙️ Speak',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
                         ),
                       ),
                     ),
+                    const SizedBox(width: 6),
                     OutlinedButton.icon(
                       key: const Key('polish_remark_button'),
                       style: OutlinedButton.styleFrom(
                         visualDensity: VisualDensity.compact,
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
+                          horizontal: 8,
                           vertical: 4,
                         ),
                         foregroundColor: const Color(0xFF8B5CF6),
@@ -8724,7 +9084,7 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
                             )
                           : const Icon(Icons.auto_awesome_rounded, size: 14),
                       label: Text(
-                        _isPolishing ? 'Polishing...' : '✨ Polish English (AI)',
+                        _isPolishing ? 'Polishing...' : '✨ Polish',
                         style: const TextStyle(
                           fontWeight: FontWeight.w600,
                           fontSize: 12,
