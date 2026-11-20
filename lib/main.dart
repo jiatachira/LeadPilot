@@ -7882,9 +7882,13 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
         messenger?.showSnackBar(
           SnackBar(
             content: const Text('✨ Remark polished into clear English!'),
+            behavior: SnackBarBehavior.floating,
+            dismissDirection: DismissDirection.horizontal,
+            duration: const Duration(seconds: 2),
             action: SnackBarAction(
               label: 'Undo',
               onPressed: () {
+                messenger.hideCurrentSnackBar();
                 setState(() {
                   _commentController.text = originalText;
                   _commentController.selection = TextSelection.fromPosition(
@@ -7893,7 +7897,6 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
                 });
               },
             ),
-            duration: const Duration(seconds: 5),
           ),
         );
       }
@@ -8395,6 +8398,7 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
                             attempts: updatedAttempts,
                           );
                           if (context.mounted) {
+                            ScaffoldMessenger.maybeOf(context)?.removeCurrentSnackBar();
                             Navigator.of(context).pop(inactiveStudent);
                           }
                           return;
@@ -8402,6 +8406,7 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
                       }
 
                       if (context.mounted) {
+                        ScaffoldMessenger.maybeOf(context)?.removeCurrentSnackBar();
                         Navigator.of(context).pop(updated);
                       }
                     },
