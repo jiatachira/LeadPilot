@@ -10,6 +10,7 @@ import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
+import android.provider.CallLog
 import android.provider.Settings
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -222,6 +223,31 @@ class MainActivity : FlutterFragmentActivity() {
                             result.error("SETTINGS_ERROR", e.message, null)
                         }
                     }
+                    "getLatestCallLog" -> {
+                        try {
+                            val phone = call.argument<String>("phone")
+                            val log = getLatestCallLogForPhone(phone)
+                            result.success(log)
+                        } catch (e: Exception) {
+                            result.error("CALL_LOG_ERROR", e.message, null)
+                        }
+                    }
+                    "getPendingCallLogs" -> {
+                        try {
+                            val list = CallerIdCacheManager.getPendingCallLogs(applicationContext).map { obj ->
+                                mapOf(
+                                    "phone" to obj.optString("phone"),
+                                    "duration" to obj.optLong("duration"),
+                                    "type" to obj.optString("type"),
+                                    "timestamp" to obj.optLong("timestamp")
+                                )
+                            }
+                            CallerIdCacheManager.clearPendingCallLogs(applicationContext)
+                            result.success(list)
+                        } catch (e: Exception) {
+                            result.error("PENDING_LOGS_ERROR", e.message, null)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -372,6 +398,70 @@ class MainActivity : FlutterFragmentActivity() {
         }
 
         return phoneStateOk && callLogOk
+    }
+
+    private fun getLatestCallLogForPhone(targetPhone: String?): Map<String, Any>? {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) {
+            android.util.Log.w("MainActivity", "READ_CALL_LOG permission not granted when fetching call duration")
+            return null
+        }
+        val cr = contentResolver ?: return null
+        val normTarget = CallerIdCacheManager.normalizePhoneNumber(targetPhone)
+
+        val cursor = cr.query(
+            CallLog.Calls.CONTENT_URI,
+            arrayOf(
+                CallLog.Calls.NUMBER,
+                CallLog.Calls.DURATION,
+                CallLog.Calls.TYPE,
+                CallLog.Calls.DATE
+            ),
+            null,
+            null,
+            "${CallLog.Calls.DATE} DESC"
+        ) ?: return null
+
+        cursor.use { c ->
+            val numIdx = c.getColumnIndex(CallLog.Calls.NUMBER)
+            val durIdx = c.getColumnIndex(CallLog.Calls.DURATION)
+            val typeIdx = c.getColumnIndex(CallLog.Calls.TYPE)
+            val dateIdx = c.getColumnIndex(CallLog.Calls.DATE)
+
+            var checkedCount = 0
+            while (c.moveToNext() && checkedCount < 10) {
+                checkedCount++
+                val number = if (numIdx >= 0) c.getString(numIdx) ?: "" else ""
+                val duration = if (durIdx >= 0) c.getLong(durIdx) else 0L
+                val type = if (typeIdx >= 0) c.getInt(typeIdx) else 0
+                val date = if (dateIdx >= 0) c.getLong(dateIdx) else 0L
+
+                val normNum = CallerIdCacheManager.normalizePhoneNumber(number)
+                val isMatch = if (normTarget.isNotEmpty() && normNum.isNotEmpty()) {
+                    normTarget == normNum || normNum.endsWith(normTarget) || normTarget.endsWith(normNum)
+                } else if (normTarget.isEmpty()) {
+                    true
+                } else {
+                    number.filter { it.isDigit() } == targetPhone?.filter { it.isDigit() }
+                }
+
+                if (isMatch) {
+                    val callTypeStr = when (type) {
+                        CallLog.Calls.INCOMING_TYPE -> "incoming"
+                        CallLog.Calls.OUTGOING_TYPE -> "outgoing"
+                        CallLog.Calls.MISSED_TYPE -> "missed"
+                        CallLog.Calls.REJECTED_TYPE -> "rejected"
+                        else -> "unknown"
+                    }
+                    return mapOf(
+                        "number" to number,
+                        "duration" to duration,
+                        "type" to callTypeStr,
+                        "timestamp" to date
+                    )
+                }
+            }
+        }
+        return null
     }
 
     override fun onRequestPermissionsResult(

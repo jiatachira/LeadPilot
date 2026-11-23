@@ -22,7 +22,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.21.0';
+const String kAppVersion = '1.22.0';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -770,6 +770,10 @@ abstract interface class AppSettingsStore {
   Future<bool> readAutoCheckUpdates();
 
   Future<void> saveAutoCheckUpdates(bool enabled);
+
+  Future<bool> readAutoLogCallDuration();
+
+  Future<void> saveAutoLogCallDuration(bool enabled);
 }
 
 class SecureAppSettingsStore implements AppSettingsStore {
@@ -789,6 +793,7 @@ class SecureAppSettingsStore implements AppSettingsStore {
   static const _geminiModelKey = 'student_call_gemini_model';
   static const _companyDescriptionKey = 'student_call_company_description';
   static const _autoCheckUpdatesKey = 'student_call_auto_check_updates';
+  static const _autoLogCallDurationKey = 'student_call_auto_log_call_duration';
   final FlutterSecureStorage _storage;
 
   @override
@@ -956,6 +961,16 @@ class SecureAppSettingsStore implements AppSettingsStore {
       _storage.write(key: _autoCheckUpdatesKey, value: enabled.toString());
 
   @override
+  Future<bool> readAutoLogCallDuration() async {
+    final value = await _storage.read(key: _autoLogCallDurationKey);
+    return value != 'false';
+  }
+
+  @override
+  Future<void> saveAutoLogCallDuration(bool enabled) =>
+      _storage.write(key: _autoLogCallDurationKey, value: enabled.toString());
+
+  @override
   Future<void> saveSheetConfig(String url, {String name = ''}) async {
     final normalizedUrl = url.trim();
     final linkedSheets = await readLinkedSheets();
@@ -1103,6 +1118,7 @@ class MemoryAppSettingsStore implements AppSettingsStore {
   }
 
   bool autoCheckUpdates = true;
+  bool autoLogCallDuration = true;
 
   @override
   Future<bool> readAutoCheckUpdates() async => autoCheckUpdates;
@@ -1110,6 +1126,14 @@ class MemoryAppSettingsStore implements AppSettingsStore {
   @override
   Future<void> saveAutoCheckUpdates(bool enabled) async {
     autoCheckUpdates = enabled;
+  }
+
+  @override
+  Future<bool> readAutoLogCallDuration() async => autoLogCallDuration;
+
+  @override
+  Future<void> saveAutoLogCallDuration(bool enabled) async {
+    autoLogCallDuration = enabled;
   }
 }
 
@@ -1119,9 +1143,51 @@ ThemeMode _themeModeFromName(String? value) => switch (value) {
   _ => ThemeMode.system,
 };
 
+String formatCallDuration(int seconds) {
+  if (seconds <= 0) return '0s';
+  final mins = seconds ~/ 60;
+  final secs = seconds % 60;
+  if (mins > 0 && secs > 0) {
+    return '$mins min${mins > 1 ? 's' : ''} ${secs.toString().padLeft(2, '0')} sec${secs > 1 ? 's' : ''}';
+  } else if (mins > 0) {
+    return '$mins min${mins > 1 ? 's' : ''}';
+  } else {
+    return '$secs sec${secs > 1 ? 's' : ''}';
+  }
+}
+
 class CallerIdService {
   static const MethodChannel channel =
       MethodChannel('com.example.call_dial/caller_id');
+
+  static Future<Map<String, dynamic>?> getLatestCallLog({String? phone}) async {
+    try {
+      final res = await channel.invokeMapMethod<String, dynamic>(
+        'getLatestCallLog',
+        {'phone': phone},
+      );
+      return res;
+    } on MissingPluginException {
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getPendingCallLogs() async {
+    try {
+      final res = await channel.invokeListMethod<dynamic>('getPendingCallLogs');
+      if (res == null) return [];
+      return res
+          .whereType<Map>()
+          .map((m) => m.map((k, v) => MapEntry(k.toString(), v)))
+          .toList();
+    } on MissingPluginException {
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
 
   static Future<bool> isEnabled() async {
     try {
@@ -5299,7 +5365,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _searchController = TextEditingController();
   final List<Student> _students = [];
   final Set<String> _selectedStudentKeys = {};
@@ -5324,10 +5390,21 @@ class _HomeScreenState extends State<HomeScreen> {
   DateTime? _dateTo;
   bool _isSelectionMode = false;
 
+  Student? _pendingCallStudent;
+  DateTime? _callStartedAt;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadInitialOfflineData();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_checkAndLogCallDuration());
+    }
   }
 
   Future<void> _loadInitialOfflineData() async {
@@ -5387,6 +5464,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _offlineQueueRetryTimer?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -6768,12 +6846,183 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _callStudent(Student student) async {
     try {
+      _pendingCallStudent = student;
+      _callStartedAt = DateTime.now();
       final launched = await launchUrl(Uri.parse('tel:${student.phone}'));
       if (!launched && mounted) {
         _showMessage('Could not open the phone dialer for ${student.name}.');
       }
     } on Exception catch (error) {
       if (mounted) _showMessage('Could not start the call: $error');
+    }
+  }
+
+  Future<void> _checkAndLogCallDuration() async {
+    // 1. Check if an in-app call was placed to a student
+    if (_pendingCallStudent != null && _callStartedAt != null) {
+      final student = _pendingCallStudent!;
+      final startedAt = _callStartedAt!;
+      _pendingCallStudent = null;
+      _callStartedAt = null;
+
+      final elapsedSec = DateTime.now().difference(startedAt).inSeconds;
+      if (elapsedSec >= 2) {
+        // Wait 1s for Android telecom CallLog to flush
+        await Future<void>.delayed(const Duration(milliseconds: 1000));
+        if (!mounted) return;
+
+        int durationSec = elapsedSec;
+        try {
+          final log =
+              await CallerIdService.getLatestCallLog(phone: student.phone);
+          if (log != null && log['duration'] is num) {
+            durationSec = (log['duration'] as num).toInt();
+          }
+        } catch (_) {}
+
+        await _logCallDurationForStudent(student, durationSec);
+      }
+    }
+
+    // 2. Also check any pending incoming/background calls captured by PhoneStateReceiver
+    try {
+      final pendingLogs = await CallerIdService.getPendingCallLogs();
+      for (final log in pendingLogs) {
+        final phone = log['phone']?.toString();
+        final duration = (log['duration'] as num?)?.toInt() ?? 0;
+        if (phone != null && phone.isNotEmpty) {
+          final matchingStudent = _students
+              .where((s) =>
+                  normalizeContactPhone(s.phone) ==
+                  normalizeContactPhone(phone))
+              .firstOrNull;
+          if (matchingStudent != null) {
+            await _logCallDurationForStudent(matchingStudent, duration);
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _logCallDurationForStudent(
+    Student student,
+    int durationSeconds,
+  ) async {
+    final autoLog = await _settingsStore.readAutoLogCallDuration();
+    if (!autoLog) return;
+
+    final durationText = formatCallDuration(durationSeconds);
+    final commentText = durationSeconds > 0
+        ? '[Call Connected • $durationText]'
+        : '[No Answer • 0s]';
+
+    final now = DateTime.now();
+    final formattedNow = _formatReminder(now);
+    final newHistoryEntry = '$formattedNow — $commentText';
+
+    // Prevent duplicate logging if the exact same comment was just logged
+    if (student.commentHistory.isNotEmpty) {
+      final last = student.commentHistory.last;
+      if (last.contains(commentText)) {
+        return;
+      }
+    }
+
+    final updatedHistory = List<String>.of(student.commentHistory)
+      ..add(newHistoryEntry);
+
+    String newStatus = student.callStatus;
+    if (durationSeconds > 0) {
+      if (newStatus == 'Pending' ||
+          newStatus == 'No Answer' ||
+          newStatus == 'Not Responding') {
+        newStatus = 'Follow-up';
+      }
+    } else {
+      if (newStatus == 'Pending') {
+        newStatus = 'No Answer';
+      }
+    }
+
+    final updatedAttempts = List<CallAttempt>.of(student.attempts)
+      ..add(
+        CallAttempt(
+          dateTime: now.toIso8601String(),
+          status: newStatus,
+          comment: commentText,
+        ),
+      );
+
+    final updatedStudent = student.copyWith(
+      callStatus: newStatus,
+      comment: commentText,
+      commentHistory: updatedHistory,
+      attempts: updatedAttempts,
+    );
+
+    final index = _students.indexWhere(
+      (s) =>
+          normalizeContactPhone(s.phone) ==
+          normalizeContactPhone(student.phone),
+    );
+    if (index >= 0) {
+      if (mounted) {
+        setState(() {
+          _students[index] = updatedStudent;
+        });
+      }
+      await _settingsStore.saveCachedStudents(_students);
+
+      if (widget.sheetConfig.isNotEmpty) {
+        try {
+          await widget.sheetService.updateStudentInSheet(
+            widget.sheetConfig,
+            updatedStudent,
+            previousPhone: student.phone,
+          );
+        } catch (_) {
+          await _enqueueOfflineAction(
+            QueuedSheetAction(
+              id: DateTime.now().microsecondsSinceEpoch.toString(),
+              action: 'update',
+              student: updatedStudent,
+              previousPhone: student.phone,
+              queuedAt: DateTime.now(),
+            ),
+          );
+        }
+      }
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(
+                Icons.check_circle_rounded,
+                color: Color(0xFF62D6B0),
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Logged: $commentText for ${student.name}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          action: SnackBarAction(
+            label: 'Add Note',
+            textColor: const Color(0xFF62D6B0),
+            onPressed: () => _editStudent(updatedStudent),
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
     }
   }
 
@@ -9966,6 +10215,7 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
   bool _hasOverlayPermission = false;
   bool _hasPhonePermissions = false;
   bool _isIgnoringBattery = true;
+  bool _autoLogCallDuration = true;
   int _cachedCount = 0;
   String _geminiApiKey = '';
   bool _autoCheckUpdates = true;
@@ -10030,6 +10280,8 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
     final hasPhone = await CallerIdService.hasPhonePermissions();
     final isIgnoringBattery =
         await CallerIdService.isIgnoringBatteryOptimizations();
+    final autoLog =
+        await widget.settingsStore?.readAutoLogCallDuration() ?? true;
     var count = await CallerIdService.getCachedCount();
     if (count == 0 && widget.students.isNotEmpty) {
       await CallerIdService.syncStudents(widget.students);
@@ -10041,6 +10293,7 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
         _hasOverlayPermission = hasOverlay;
         _hasPhonePermissions = hasPhone;
         _isIgnoringBattery = isIgnoringBattery;
+        _autoLogCallDuration = autoLog;
         _cachedCount = count > 0 ? count : widget.students.length;
       });
     }
@@ -10528,6 +10781,24 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
                         ),
                         onTap: () async {
                           await CallerIdService.openAppDetailsSettings();
+                        },
+                      ),
+                      Divider(
+                        height: 1,
+                        indent: 56,
+                        color: theme.colorScheme.outlineVariant,
+                      ),
+                      SwitchListTile(
+                        secondary: const Icon(Icons.timer_outlined),
+                        title: const Text('Auto-log Call Duration'),
+                        subtitle: const Text(
+                          'Record [Call Connected • 3 mins 45 secs] in lead history after each call',
+                        ),
+                        value: _autoLogCallDuration,
+                        onChanged: (val) async {
+                          setState(() => _autoLogCallDuration = val);
+                          await widget.settingsStore
+                              ?.saveAutoLogCallDuration(val);
                         },
                       ),
                       Divider(

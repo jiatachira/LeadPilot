@@ -13,6 +13,9 @@ class PhoneStateReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "PhoneStateReceiver"
         private var lastShownNumber: String? = null
+        private var activeCallNumber: String? = null
+        private var callStartTimeMs: Long = 0L
+        private var callType: String = "incoming"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -47,6 +50,9 @@ class PhoneStateReceiver : BroadcastReceiver() {
                 Log.d(TAG, "EXTRA_STATE_RINGING. Incoming number extracted: '$incomingNumber'")
 
                 if (!incomingNumber.isNullOrEmpty()) {
+                    activeCallNumber = incomingNumber
+                    callType = "incoming"
+
                     // Prevent duplicate popups for the exact same ringing event
                     if (incomingNumber == lastShownNumber) {
                         Log.d(TAG, "Overlay already displayed for $incomingNumber. Skipping duplicate.")
@@ -74,15 +80,32 @@ class PhoneStateReceiver : BroadcastReceiver() {
                     Log.w(TAG, "Incoming number is null/empty. Check if READ_CALL_LOG permission is granted.")
                 }
             }
+            TelephonyManager.EXTRA_STATE_OFFHOOK -> {
+                Log.d(TAG, "EXTRA_STATE_OFFHOOK: Call answered or dialed.")
+                callStartTimeMs = System.currentTimeMillis()
+                if (activeCallNumber == null) {
+                    callType = "outgoing"
+                }
+            }
             TelephonyManager.EXTRA_STATE_IDLE -> {
                 Log.d(TAG, "EXTRA_STATE_IDLE: Phone call ended or idle. Dismissing all overlays/notifications.")
+                // Record call duration if we have an active caller number
+                val targetPhone = activeCallNumber ?: lastShownNumber
+                if (!targetPhone.isNullOrEmpty()) {
+                    val durationSec = if (callStartTimeMs > 0L) {
+                        (System.currentTimeMillis() - callStartTimeMs) / 1000
+                    } else {
+                        0L
+                    }
+                    CallerIdCacheManager.addPendingCallLog(appContext, targetPhone, durationSec, callType)
+                }
+
+                activeCallNumber = null
+                callStartTimeMs = 0L
                 lastShownNumber = null
                 CallerIdNotificationHelper.cancel(appContext)
                 CallerIdActivity.dismissCurrent()
                 CallerIdOverlayManager.dismiss(appContext)
-            }
-            TelephonyManager.EXTRA_STATE_OFFHOOK -> {
-                Log.d(TAG, "EXTRA_STATE_OFFHOOK: Call answered. Keeping details visible for call.")
             }
         }
     }

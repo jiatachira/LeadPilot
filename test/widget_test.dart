@@ -174,14 +174,20 @@ void main() {
     );
   });
 
-  test('builds SMS composer links with normalized phone numbers and optional body', () {
-    expect(smsComposerUri('070 106 1244').toString(), 'sms:+94701061244');
-    expect(smsComposerUri('+1 (555) 010-1234').toString(), 'sms:+15550101234');
-    expect(
-      smsComposerUri('070 106 1244', body: 'Hello student').toString(),
-      'sms:+94701061244?body=Hello+student',
-    );
-  });
+  test(
+    'builds SMS composer links with normalized phone numbers and optional body',
+    () {
+      expect(smsComposerUri('070 106 1244').toString(), 'sms:+94701061244');
+      expect(
+        smsComposerUri('+1 (555) 010-1234').toString(),
+        'sms:+15550101234',
+      );
+      expect(
+        smsComposerUri('070 106 1244', body: 'Hello student').toString(),
+        'sms:+94701061244?body=Hello+student',
+      );
+    },
+  );
 
   test('allocates stable, distinct reminder notification IDs per phone', () {
     final firstId = allocateReminderNotificationId('0701061244', const {});
@@ -1844,8 +1850,9 @@ void main() {
           'name': 'Past Call',
           'contact': '555-0803',
           'addedDate': now.toIso8601String(),
-          'nextCallDateTime':
-              now.subtract(const Duration(hours: 1)).toIso8601String(),
+          'nextCallDateTime': now
+              .subtract(const Duration(hours: 1))
+              .toIso8601String(),
           'callStatus': 'Pending',
           'attempts': [],
         },
@@ -2023,66 +2030,65 @@ void main() {
     },
   );
 
-  testWidgets(
-    'tapping WhatsApp action offers Custom and Template choices',
-    (tester) async {
-      final initialStudent = {
-        'name': 'Kamal Perera',
-        'contact': '0701061244',
-        'addedDate': DateTime.now().toIso8601String(),
-        'callStatus': 'Pending',
-        'comment': '',
-        'attempts': [],
-      };
-      final client = MockClient((request) async {
-        if (request.method == 'GET') {
-          return http.Response(
-            jsonEncode({
-              'students': [initialStudent],
-            }),
-            200,
-          );
-        }
-        return http.Response('{"success":true}', 200);
-      });
+  testWidgets('tapping WhatsApp action offers Custom and Template choices', (
+    tester,
+  ) async {
+    final initialStudent = {
+      'name': 'Kamal Perera',
+      'contact': '0701061244',
+      'addedDate': DateTime.now().toIso8601String(),
+      'callStatus': 'Pending',
+      'comment': '',
+      'attempts': [],
+    };
+    final client = MockClient((request) async {
+      if (request.method == 'GET') {
+        return http.Response(
+          jsonEncode({
+            'students': [initialStudent],
+          }),
+          200,
+        );
+      }
+      return http.Response('{"success":true}', 200);
+    });
 
-      final settingsStore = MemoryAppSettingsStore()
-        ..pin = '2580'
-        ..sheetConfig = 'https://script.google.com/macros/s/test/exec';
+    final settingsStore = MemoryAppSettingsStore()
+      ..pin = '2580'
+      ..sheetConfig = 'https://script.google.com/macros/s/test/exec';
 
-      await tester.pumpWidget(
-        testApp(httpClient: client, settingsStore: settingsStore),
-      );
-      await tester.pumpAndSettle();
-      await enterPin(tester, '2580');
-      await tester.pumpAndSettle();
+    await tester.pumpWidget(
+      testApp(httpClient: client, settingsStore: settingsStore),
+    );
+    await tester.pumpAndSettle();
+    await enterPin(tester, '2580');
+    await tester.pumpAndSettle();
 
-      final firstWhatsAppBtn = find.byTooltip('Open WhatsApp chat').first;
-      await tester.tap(firstWhatsAppBtn);
-      await tester.pumpAndSettle();
+    final firstWhatsAppBtn = find.byTooltip('Open WhatsApp chat').first;
+    await tester.tap(firstWhatsAppBtn);
+    await tester.pumpAndSettle();
 
-      expect(find.text('Send WhatsApp Message'), findsOneWidget);
-      expect(find.text('Custom'), findsOneWidget);
-      expect(find.text('Template'), findsOneWidget);
+    expect(find.text('Send WhatsApp Message'), findsOneWidget);
+    expect(find.text('Custom'), findsOneWidget);
+    expect(find.text('Template'), findsOneWidget);
 
-      await tester.tap(find.text('Template'));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text('Template'));
+    await tester.pumpAndSettle();
 
-      expect(find.text('Select Template'), findsOneWidget);
-      expect(find.text('General Follow-up'), findsOneWidget);
-      expect(
-        find.textContaining(
-          'Hello Kamal Perera, following up on our recent conversation.',
-        ),
-        findsOneWidget,
-      );
+    expect(find.text('Select Template'), findsOneWidget);
+    expect(find.text('General Follow-up'), findsOneWidget);
+    expect(
+      find.textContaining(
+        'Hello Kamal Perera, following up on our recent conversation.',
+      ),
+      findsOneWidget,
+    );
 
-      await tester.tap(find.text('General Follow-up'));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text('General Follow-up'));
+    await tester.pumpAndSettle();
 
-      expect(find.text('Select Template'), findsNothing);
-    },
-  );
+    expect(find.text('Select Template'), findsNothing);
+  });
 
   test(
     'calculates consecutive unanswered streak correctly and resets on answer',
@@ -2123,12 +2129,16 @@ void main() {
         attempts: [
           ...student3.attempts,
           CallAttempt(
-            dateTime: now.subtract(const Duration(minutes: 30)).toIso8601String(),
+            dateTime: now
+                .subtract(const Duration(minutes: 30))
+                .toIso8601String(),
             status: 'Line Busy',
             comment: '',
           ),
           CallAttempt(
-            dateTime: now.subtract(const Duration(minutes: 10)).toIso8601String(),
+            dateTime: now
+                .subtract(const Duration(minutes: 10))
+                .toIso8601String(),
             status: 'No Answer',
             comment: '',
           ),
@@ -2197,7 +2207,9 @@ void main() {
 
       expect(find.text('Move to Inactive?'), findsOneWidget);
       expect(
-        find.textContaining('Kamal Perera has not answered 6 consecutive times.'),
+        find.textContaining(
+          'Kamal Perera has not answered 6 consecutive times.',
+        ),
         findsOneWidget,
       );
 
@@ -2218,12 +2230,12 @@ void main() {
     final calls = <MethodCall>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(CallerIdService.channel, (call) async {
-      calls.add(call);
-      if (call.method == 'isCallerIdEnabled') return true;
-      if (call.method == 'canDrawOverlays') return true;
-      if (call.method == 'hasPhonePermissions') return true;
-      return true;
-    });
+          calls.add(call);
+          if (call.method == 'isCallerIdEnabled') return true;
+          if (call.method == 'canDrawOverlays') return true;
+          if (call.method == 'hasPhonePermissions') return true;
+          return true;
+        });
 
     final now = DateTime.now();
     final student = Student(
@@ -2282,88 +2294,90 @@ void main() {
         .setMockMethodCallHandler(CallerIdService.channel, null);
   });
 
-  testWidgets('Settings displays Incoming Caller ID toggle, test popup, and v1.11.1', (tester) async {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(CallerIdService.channel, (call) async {
-      if (call.method == 'isCallerIdEnabled') return true;
-      if (call.method == 'canDrawOverlays') return true;
-      if (call.method == 'hasPhonePermissions') return true;
-      if (call.method == 'getCachedStudentCount') return 5;
-      return true;
-    });
+  testWidgets(
+    'Settings displays Incoming Caller ID toggle, test popup, and v1.11.1',
+    (tester) async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(CallerIdService.channel, (call) async {
+            if (call.method == 'isCallerIdEnabled') return true;
+            if (call.method == 'canDrawOverlays') return true;
+            if (call.method == 'hasPhonePermissions') return true;
+            if (call.method == 'getCachedStudentCount') return 5;
+            return true;
+          });
 
-    final settingsStore = MemoryAppSettingsStore()..pin = '2580';
-    await tester.pumpWidget(testApp(settingsStore: settingsStore));
-    await tester.pumpAndSettle();
-    await enterPin(tester, '2580');
-    await tester.pumpAndSettle();
+      final settingsStore = MemoryAppSettingsStore()..pin = '2580';
+      await tester.pumpWidget(testApp(settingsStore: settingsStore));
+      await tester.pumpAndSettle();
+      await enterPin(tester, '2580');
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Settings'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
 
-    final testPopupFinder = find.text('Preview / Test Popup');
-    await tester.ensureVisible(testPopupFinder);
-    await tester.pumpAndSettle();
+      final testPopupFinder = find.text('Preview / Test Popup');
+      await tester.ensureVisible(testPopupFinder);
+      await tester.pumpAndSettle();
 
-    expect(find.text('Caller ID'), findsOneWidget);
-    expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
-    expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.21.0'), findsOneWidget);
+      expect(find.text('Caller ID'), findsOneWidget);
+      expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
+      expect(testPopupFinder, findsOneWidget);
+      expect(find.text('LeadPilot v1.22.0'), findsOneWidget);
 
-    await tester.tap(testPopupFinder);
-    await tester.pumpAndSettle();
-    expect(find.text('Sample Caller ID popup displayed!'), findsOneWidget);
+      await tester.tap(testPopupFinder);
+      await tester.pumpAndSettle();
+      expect(find.text('Sample Caller ID popup displayed!'), findsOneWidget);
 
-    final bannerFinder = find.text('Test Lock Screen & Heads-Up Banner');
-    await tester.ensureVisible(bannerFinder);
-    await tester.pumpAndSettle();
-    expect(bannerFinder, findsOneWidget);
-    await tester.tap(bannerFinder);
-    await tester.pumpAndSettle();
-    expect(
-      find.text(
-        'Sample Heads-Up / Lock Screen banner displayed! Check your notifications.',
-      ),
-      findsOneWidget,
-    );
+      final bannerFinder = find.text('Test Lock Screen & Heads-Up Banner');
+      await tester.ensureVisible(bannerFinder);
+      await tester.pumpAndSettle();
+      expect(bannerFinder, findsOneWidget);
+      await tester.tap(bannerFinder);
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'Sample Heads-Up / Lock Screen banner displayed! Check your notifications.',
+        ),
+        findsOneWidget,
+      );
 
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(CallerIdService.channel, null);
-  });
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(CallerIdService.channel, null);
+    },
+  );
 
   testWidgets(
-      'PinScreen auto-biometric dismissal does not decrement attempts or show error',
-      (tester) async {
-    var biometricCalled = false;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: PinScreen(
-            isFirstTime: false,
-            storedPin: '2580',
-            biometricEnabled: true,
-            onBiometricAuth: () async {
-              biometricCalled = true;
-              return false; // User dismissed or canceled
-            },
-            onPinCreated: (_) async {},
-            onAuthenticated: () {},
+    'PinScreen auto-biometric dismissal does not decrement attempts or show error',
+    (tester) async {
+      var biometricCalled = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PinScreen(
+              isFirstTime: false,
+              storedPin: '2580',
+              biometricEnabled: true,
+              onBiometricAuth: () async {
+                biometricCalled = true;
+                return false; // User dismissed or canceled
+              },
+              onPinCreated: (_) async {},
+              onAuthenticated: () {},
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    expect(biometricCalled, isTrue);
-    expect(find.textContaining('tries left'), findsNothing);
-    expect(find.textContaining('not recognised'), findsNothing);
-    expect(find.text('Welcome Back'), findsOneWidget);
-    expect(find.text('Use fingerprint or enter your PIN.'), findsOneWidget);
-  });
+      expect(biometricCalled, isTrue);
+      expect(find.textContaining('tries left'), findsNothing);
+      expect(find.textContaining('not recognised'), findsNothing);
+      expect(find.text('Welcome Back'), findsOneWidget);
+      expect(find.text('Use fingerprint or enter your PIN.'), findsOneWidget);
+    },
+  );
 
-  test(
-      'GeminiService generates follow-up message using student context and mock client',
-      () async {
+  test('GeminiService generates follow-up message using student context and mock client', () async {
     final mockClient = MockClient((request) async {
       expect(request.url.queryParameters['key'], 'test_api_key_123');
       final body = jsonDecode(request.body) as Map<String, dynamic>;
@@ -2380,12 +2394,12 @@ void main() {
                 'parts': [
                   {
                     'text':
-                        'Hello Kamal, following up on your class fee inquiry!'
-                  }
-                ]
-              }
-            }
-          ]
+                        'Hello Kamal, following up on your class fee inquiry!',
+                  },
+                ],
+              },
+            },
+          ],
         }),
         200,
         headers: {'content-type': 'application/json'},
@@ -2412,85 +2426,79 @@ void main() {
   });
 
   testWidgets(
-      'WhatsApp choice sheet displays Generate with AI option and Gemini badge',
-      (tester) async {
-    const student = Student(
-      name: 'Kamal Perera',
-      phone: '0771234567',
-    );
+    'WhatsApp choice sheet displays Generate with AI option and Gemini badge',
+    (tester) async {
+      const student = Student(name: 'Kamal Perera', phone: '0771234567');
 
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: Scaffold(
-          body: WhatsAppChoiceSheet(student: student),
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: WhatsAppChoiceSheet(student: student)),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Custom'), findsOneWidget);
-    expect(find.text('Template'), findsOneWidget);
-    expect(find.text('Generate with AI'), findsOneWidget);
-    expect(find.text('Gemini'), findsOneWidget);
-  });
+      expect(find.text('Custom'), findsOneWidget);
+      expect(find.text('Template'), findsOneWidget);
+      expect(find.text('Generate with AI'), findsOneWidget);
+      expect(find.text('Gemini'), findsOneWidget);
+    },
+  );
 
-  testWidgets('SMS choice sheet displays Custom, Template, and Generate with AI',
-      (tester) async {
-    const student = Student(
-      name: 'Nimal Bandara',
-      phone: '0712345678',
-    );
+  testWidgets(
+    'SMS choice sheet displays Custom, Template, and Generate with AI',
+    (tester) async {
+      const student = Student(name: 'Nimal Bandara', phone: '0712345678');
 
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: Scaffold(
-          body: SmsChoiceSheet(student: student),
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: SmsChoiceSheet(student: student)),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Send SMS Message'), findsOneWidget);
-    expect(find.text('SMS to Nimal Bandara'), findsOneWidget);
-    expect(find.text('Custom'), findsOneWidget);
-    expect(find.text('Open SMS app with a blank message'), findsOneWidget);
-    expect(find.text('Template'), findsOneWidget);
-    expect(find.text('Generate with AI'), findsOneWidget);
-    expect(find.text('Gemini'), findsOneWidget);
-  });
+      expect(find.text('Send SMS Message'), findsOneWidget);
+      expect(find.text('SMS to Nimal Bandara'), findsOneWidget);
+      expect(find.text('Custom'), findsOneWidget);
+      expect(find.text('Open SMS app with a blank message'), findsOneWidget);
+      expect(find.text('Template'), findsOneWidget);
+      expect(find.text('Generate with AI'), findsOneWidget);
+      expect(find.text('Gemini'), findsOneWidget);
+    },
+  );
 
-  testWidgets('StudentCard displays history button with Icons.history_rounded',
-      (tester) async {
-    const student = Student(
-      name: 'Test Student',
-      phone: '0712345678',
-    );
+  testWidgets(
+    'StudentCard displays history button with Icons.history_rounded',
+    (tester) async {
+      const student = Student(name: 'Test Student', phone: '0712345678');
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: StudentCard(
-            student: student,
-            onTap: () {},
-            onLongPress: () {},
-            onCall: () {},
-            onWhatsApp: () {},
-            onSms: () {},
-            onNote: () {},
-            onSaveContact: () {},
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StudentCard(
+              student: student,
+              onTap: () {},
+              onLongPress: () {},
+              onCall: () {},
+              onWhatsApp: () {},
+              onSms: () {},
+              onNote: () {},
+              onSaveContact: () {},
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.byTooltip('Call history'), findsOneWidget);
-    expect(find.byIcon(Icons.history_rounded), findsOneWidget);
-  });
+      expect(find.byTooltip('Call history'), findsOneWidget);
+      expect(find.byIcon(Icons.history_rounded), findsOneWidget);
+    },
+  );
 
   test('GeminiService.sanitizeApiKey correctly cleans messy input keys', () {
     expect(
-      GeminiService.sanitizeApiKey('  "AIzaSyD1234567890abcdefghijklmnopqrst"  '),
+      GeminiService.sanitizeApiKey(
+        '  "AIzaSyD1234567890abcdefghijklmnopqrst"  ',
+      ),
       'AIzaSyD1234567890abcdefghijklmnopqrst',
     );
     expect(
@@ -2502,15 +2510,21 @@ void main() {
       'AIzaSyD1234567890abcdefghijklmnopqrst',
     );
     expect(
-      GeminiService.sanitizeApiKey('https://generativelanguage.googleapis.com?key=AIzaSyD1234567890abcdefghijklmnopqrst'),
+      GeminiService.sanitizeApiKey(
+        'https://generativelanguage.googleapis.com?key=AIzaSyD1234567890abcdefghijklmnopqrst',
+      ),
       'AIzaSyD1234567890abcdefghijklmnopqrst',
     );
     expect(
-      GeminiService.sanitizeApiKey('  `AIzaSyD1234567890abcdefghijklmnopqrst` \n'),
+      GeminiService.sanitizeApiKey(
+        '  `AIzaSyD1234567890abcdefghijklmnopqrst` \n',
+      ),
       'AIzaSyD1234567890abcdefghijklmnopqrst',
     );
     expect(
-      GeminiService.looksLikeGoogleApiKey('AIzaSyD1234567890abcdefghijklmnopqrst'),
+      GeminiService.looksLikeGoogleApiKey(
+        'AIzaSyD1234567890abcdefghijklmnopqrst',
+      ),
       isTrue,
     );
     expect(
@@ -2527,18 +2541,20 @@ void main() {
             {
               'content': {
                 'parts': [
-                  {'text': 'pong'}
-                ]
-              }
-            }
-          ]
+                  {'text': 'pong'},
+                ],
+              },
+            },
+          ],
         }),
         200,
       );
     });
 
     final successService = GeminiService(client: successClient);
-    final res = await successService.testConnection('AIzaSyD1234567890abcdefghijklmnopqrst');
+    final res = await successService.testConnection(
+      'AIzaSyD1234567890abcdefghijklmnopqrst',
+    );
     expect(res.isSuccess, isTrue);
     expect(res.message.contains('Connection successful'), isTrue);
     expect(res.modelName, 'gemini-1.5-flash');
@@ -2550,7 +2566,7 @@ void main() {
             'code': 400,
             'message': 'API key not valid. Please pass a valid API key.',
             'status': 'INVALID_ARGUMENT',
-          }
+          },
         }),
         400,
       );
@@ -2566,23 +2582,28 @@ void main() {
         jsonEncode({
           'error': {
             'code': 404,
-            'message':
-                'models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.',
+            'message': 'models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.',
             'status': 'NOT_FOUND',
-          }
+          },
         }),
         404,
       );
     });
 
-    final projectDisabledService =
-        GeminiService(client: projectDisabledClient);
-    final disabledRes = await projectDisabledService
-        .testConnection('AQ.Ab8RN6L_nOJHLak9Aea9qBX5fMjc');
+    final projectDisabledService = GeminiService(client: projectDisabledClient);
+    final disabledRes = await projectDisabledService.testConnection(
+      'AQ.Ab8RN6L_nOJHLak9Aea9qBX5fMjc',
+    );
     expect(disabledRes.isSuccess, isFalse);
     expect(disabledRes.statusCode, 404);
-    expect(disabledRes.message.contains('Generative Language API is disabled'), isTrue);
-    expect(disabledRes.message.contains('Create API key in new project'), isTrue);
+    expect(
+      disabledRes.message.contains('Generative Language API is disabled'),
+      isTrue,
+    );
+    expect(
+      disabledRes.message.contains('Create API key in new project'),
+      isTrue,
+    );
 
     // Test modality mismatch fallback (e.g. gemini-2.5-flash-preview-tts returns 400 modalities, gemini-1.5-flash returns 200)
     final modalityFallbackClient = MockClient((request) async {
@@ -2591,10 +2612,9 @@ void main() {
           jsonEncode({
             'error': {
               'code': 400,
-              'message':
-                  'The requested combination of response modalities (TEXT) is not supported by the model. models/gemini-2.5-flash-preview-tts accepts AUDIO',
+              'message': 'The requested combination of response modalities (TEXT) is not supported by the model. models/gemini-2.5-flash-preview-tts accepts AUDIO',
               'status': 'INVALID_ARGUMENT',
-            }
+            },
           }),
           400,
         );
@@ -2605,11 +2625,11 @@ void main() {
             {
               'content': {
                 'parts': [
-                  {'text': 'pong'}
-                ]
-              }
-            }
-          ]
+                  {'text': 'pong'},
+                ],
+              },
+            },
+          ],
         }),
         200,
       );
@@ -2624,243 +2644,257 @@ void main() {
     expect(fallbackRes.modelName, 'gemini-1.5-flash');
   });
 
-  testWidgets('ManageGeminiAiSheet tests key and displays connection feedback', (tester) async {
-    final mockClient = MockClient((request) async {
-      return http.Response(
-        jsonEncode({
-          'candidates': [
-            {
-              'content': {
-                'parts': [
-                  {'text': 'ok'}
-                ]
-              }
-            }
-          ]
-        }),
-        200,
-      );
-    });
-
-    final store = MemoryAppSettingsStore()
-      ..geminiApiKey = 'AIzaSyD1234567890abcdefghijklmnopqrst';
-    final service = GeminiService(client: mockClient);
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: ManageGeminiAiSheet(
-            settingsStore: store,
-            geminiService: service,
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('Gemini AI Assistant'), findsOneWidget);
-    final testFinder = find.text('Test Key');
-    expect(testFinder, findsOneWidget);
-
-    await tester.ensureVisible(testFinder);
-    await tester.tap(testFinder);
-    await tester.pumpAndSettle();
-
-    expect(find.textContaining('Connection successful'), findsOneWidget);
-  });
-
   testWidgets(
-      'ManageGeminiAiSheet dynamically fetches models and allows selecting preferred model',
-      (tester) async {
-    final mockClient = MockClient((request) async {
-      if (request.url.path.contains('/models') && request.method == 'GET') {
+    'ManageGeminiAiSheet tests key and displays connection feedback',
+    (tester) async {
+      final mockClient = MockClient((request) async {
         return http.Response(
           jsonEncode({
-            'models': [
+            'candidates': [
               {
-                'name': 'models/gemini-1.5-flash',
-                'displayName': 'Gemini 1.5 Flash',
-                'supportedGenerationMethods': ['generateContent'],
-              },
-              {
-                'name': 'models/gemini-2.0-flash',
-                'displayName': 'Gemini 2.0 Flash',
-                'supportedGenerationMethods': ['generateContent'],
-              },
-              {
-                'name': 'models/gemini-1.5-pro',
-                'displayName': 'Gemini 1.5 Pro',
-                'supportedGenerationMethods': ['generateContent'],
+                'content': {
+                  'parts': [
+                    {'text': 'ok'},
+                  ],
+                },
               },
             ],
           }),
           200,
         );
-      }
-      return http.Response(
-        jsonEncode({
-          'candidates': [
-            {
-              'content': {
-                'parts': [
-                  {'text': 'Ping response'}
-                ]
-              }
-            }
-          ]
-        }),
-        200,
-      );
-    });
+      });
 
-    final store = MemoryAppSettingsStore()
-      ..geminiApiKey = 'AIzaSyD1234567890abcdefghijklmnopqrst';
-    final service = GeminiService(client: mockClient);
+      final store = MemoryAppSettingsStore()
+        ..geminiApiKey = 'AIzaSyD1234567890abcdefghijklmnopqrst';
+      final service = GeminiService(client: mockClient);
 
-    // Verify fetchAvailableModels directly
-    final fetched = await service.fetchAvailableModels('AIzaSyD1234567890abcdefghijklmnopqrst');
-    expect(fetched.length, 3);
-    expect(fetched.first.id, 'gemini-1.5-flash');
-    expect(fetched[1].id, 'gemini-2.0-flash');
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: ManageGeminiAiSheet(
-            settingsStore: store,
-            geminiService: service,
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ManageGeminiAiSheet(
+              settingsStore: store,
+              geminiService: service,
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    // Tap Test Key
-    final testKeyFinder = find.text('Test Key');
-    await tester.ensureVisible(testKeyFinder);
-    await tester.tap(testKeyFinder);
-    await tester.pumpAndSettle();
+      expect(find.text('Gemini AI Assistant'), findsOneWidget);
+      final testFinder = find.text('Test Key');
+      expect(testFinder, findsOneWidget);
 
-    expect(find.textContaining('Connection successful'), findsOneWidget);
-    expect(find.text('Selected Gemini Model'), findsOneWidget);
+      await tester.ensureVisible(testFinder);
+      await tester.tap(testFinder);
+      await tester.pumpAndSettle();
 
-    // Tap Save Key
-    final saveFinder = find.text('Save Key');
-    await tester.ensureVisible(saveFinder);
-    await tester.tap(saveFinder);
-    await tester.pumpAndSettle();
-
-    expect(await store.readGeminiModel(), 'gemini-1.5-flash');
-  });
+      expect(find.textContaining('Connection successful'), findsOneWidget);
+    },
+  );
 
   testWidgets(
-      'GeminiAiMessageSheet allows saving generated message as a reusable template',
-      (tester) async {
-    final mockClient = MockClient((request) async {
-      return http.Response(
-        jsonEncode({
-          'candidates': [
-            {
-              'content': {
-                'parts': [
-                  {
-                    'text':
-                        'Hello Nimal, your tuition class starts next Monday!'
-                  }
-                ]
-              }
-            }
-          ]
-        }),
-        200,
+    'ManageGeminiAiSheet dynamically fetches models and allows selecting preferred model',
+    (tester) async {
+      final mockClient = MockClient((request) async {
+        if (request.url.path.contains('/models') && request.method == 'GET') {
+          return http.Response(
+            jsonEncode({
+              'models': [
+                {
+                  'name': 'models/gemini-1.5-flash',
+                  'displayName': 'Gemini 1.5 Flash',
+                  'supportedGenerationMethods': ['generateContent'],
+                },
+                {
+                  'name': 'models/gemini-2.0-flash',
+                  'displayName': 'Gemini 2.0 Flash',
+                  'supportedGenerationMethods': ['generateContent'],
+                },
+                {
+                  'name': 'models/gemini-1.5-pro',
+                  'displayName': 'Gemini 1.5 Pro',
+                  'supportedGenerationMethods': ['generateContent'],
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {'text': 'Ping response'},
+                  ],
+                },
+              },
+            ],
+          }),
+          200,
+        );
+      });
+
+      final store = MemoryAppSettingsStore()
+        ..geminiApiKey = 'AIzaSyD1234567890abcdefghijklmnopqrst';
+      final service = GeminiService(client: mockClient);
+
+      // Verify fetchAvailableModels directly
+      final fetched = await service.fetchAvailableModels(
+        'AIzaSyD1234567890abcdefghijklmnopqrst',
       );
-    });
+      expect(fetched.length, 3);
+      expect(fetched.first.id, 'gemini-1.5-flash');
+      expect(fetched[1].id, 'gemini-2.0-flash');
 
-    final store = MemoryAppSettingsStore()
-      ..geminiApiKey = 'AIzaSyD1234567890abcdefghijklmnopqrst';
-    final service = GeminiService(client: mockClient);
-
-    const student = Student(
-      name: 'Nimal Silva',
-      phone: '0771234567',
-      callStatus: 'Interested',
-      examType: '2026 A/L',
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: GeminiAiMessageSheet(
-            student: student,
-            initialApiKey: 'AIzaSyD1234567890abcdefghijklmnopqrst',
-            settingsStore: store,
-            geminiService: service,
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ManageGeminiAiSheet(
+              settingsStore: store,
+              geminiService: service,
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Save Template'), findsOneWidget);
-    expect(find.text('Send on WhatsApp'), findsOneWidget);
-    expect(find.text('Regenerate'), findsOneWidget);
-    expect(find.text('Generate Message'), findsOneWidget);
-    expect(find.text('What should this message be about?'), findsOneWidget);
+      // Tap Test Key
+      final testKeyFinder = find.text('Test Key');
+      await tester.ensureVisible(testKeyFinder);
+      await tester.tap(testKeyFinder);
+      await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.text('Save Template'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Save Template'));
-    await tester.pumpAndSettle();
+      expect(find.textContaining('Connection successful'), findsOneWidget);
+      expect(find.text('Selected Gemini Model'), findsOneWidget);
 
-    expect(find.text('Save as Template'), findsOneWidget);
-    expect(
-      find.text('Hello {name}, your tuition class starts next Monday!'),
-      findsOneWidget,
-    );
+      // Tap Save Key
+      final saveFinder = find.text('Save Key');
+      await tester.ensureVisible(saveFinder);
+      await tester.tap(saveFinder);
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Save'));
-    await tester.pumpAndSettle();
-
-    final templates = await store.readWhatsAppTemplates();
-    expect(
-      templates.any((t) =>
-          t.message == 'Hello {name}, your tuition class starts next Monday!'),
-      isTrue,
-    );
-  });
+      expect(await store.readGeminiModel(), 'gemini-1.5-flash');
+    },
+  );
 
   testWidgets(
-      'AppSplashScreen displays LeadPilot emblem, animates, and allows instant tap to skip',
-      (tester) async {
-    var finished = false;
+    'GeminiAiMessageSheet allows saving generated message as a reusable template',
+    (tester) async {
+      final mockClient = MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {
+                      'text':
+                          'Hello Nimal, your tuition class starts next Monday!',
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          200,
+        );
+      });
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: AppSplashScreen(
-          duration: const Duration(milliseconds: 300),
-          onFinished: () => finished = true,
+      final store = MemoryAppSettingsStore()
+        ..geminiApiKey = 'AIzaSyD1234567890abcdefghijklmnopqrst';
+      final service = GeminiService(client: mockClient);
+
+      const student = Student(
+        name: 'Nimal Silva',
+        phone: '0771234567',
+        callStatus: 'Interested',
+        examType: '2026 A/L',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GeminiAiMessageSheet(
+              student: student,
+              initialApiKey: 'AIzaSyD1234567890abcdefghijklmnopqrst',
+              settingsStore: store,
+              geminiService: service,
+            ),
+          ),
         ),
-      ),
-    );
+      );
+      await tester.pumpAndSettle();
 
-    // Initial frame
-    await tester.pump();
-    expect(find.text('LeadPilot'), findsOneWidget);
-    expect(find.text('STUDENT LEADS • SMART DIALER'), findsOneWidget);
-    expect(find.byType(LeadPilotAppIcon), findsOneWidget);
+      expect(find.text('Save Template'), findsOneWidget);
+      expect(find.text('Send on WhatsApp'), findsOneWidget);
+      expect(find.text('Regenerate'), findsOneWidget);
+      expect(find.text('Generate Message'), findsOneWidget);
+      expect(find.text('What should this message be about?'), findsOneWidget);
 
-    // Tap to skip immediately
-    await tester.tap(find.byType(AppSplashScreen));
-    await tester.pump();
-    expect(finished, isTrue);
-  });
+      await tester.ensureVisible(find.text('Save Template'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save Template'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Save as Template'), findsOneWidget);
+      expect(
+        find.text('Hello {name}, your tuition class starts next Monday!'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final templates = await store.readWhatsAppTemplates();
+      expect(
+        templates.any(
+          (t) =>
+              t.message ==
+              'Hello {name}, your tuition class starts next Monday!',
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  testWidgets(
+    'AppSplashScreen displays LeadPilot emblem, animates, and allows instant tap to skip',
+    (tester) async {
+      var finished = false;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AppSplashScreen(
+            duration: const Duration(milliseconds: 300),
+            onFinished: () => finished = true,
+          ),
+        ),
+      );
+
+      // Initial frame
+      await tester.pump();
+      expect(find.text('LeadPilot'), findsOneWidget);
+      expect(find.text('STUDENT LEADS • SMART DIALER'), findsOneWidget);
+      expect(find.byType(LeadPilotAppIcon), findsOneWidget);
+
+      // Tap to skip immediately
+      await tester.tap(find.byType(AppSplashScreen));
+      await tester.pump();
+      expect(finished, isTrue);
+    },
+  );
 
   test('MemoryAppSettingsStore stores and reads default and custom companyDescription', () async {
     final store = MemoryAppSettingsStore();
     expect(await store.readCompanyDescription(), contains('LNBTI'));
 
     await store.saveCompanyDescription('Custom Institute of Technology');
-    expect(await store.readCompanyDescription(), 'Custom Institute of Technology');
+    expect(
+      await store.readCompanyDescription(),
+      'Custom Institute of Technology',
+    );
 
     // Blank description should reset to default
     await store.saveCompanyDescription('   ');
@@ -2880,11 +2914,11 @@ void main() {
             {
               'content': {
                 'parts': [
-                  {'text': 'Hello Kasun from LNBTI!'}
-                ]
-              }
-            }
-          ]
+                  {'text': 'Hello Kasun from LNBTI!'},
+                ],
+              },
+            },
+          ],
         }),
         200,
         headers: {'content-type': 'application/json'},
@@ -2912,65 +2946,77 @@ void main() {
     expect(sentPrompt, contains('DO NOT OVER-DETAIL'));
   });
 
-  testWidgets('ManageGeminiAiSheet displays and updates Description about your company', (tester) async {
-    final store = MemoryAppSettingsStore();
-    final service = GeminiService();
+  testWidgets(
+    'ManageGeminiAiSheet displays and updates Description about your company',
+    (tester) async {
+      final store = MemoryAppSettingsStore();
+      final service = GeminiService();
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: ManageGeminiAiSheet(
-            settingsStore: store,
-            geminiService: service,
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ManageGeminiAiSheet(
+              settingsStore: store,
+              geminiService: service,
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Description about your company'), findsOneWidget);
-    expect(find.text(store.companyDescription), findsOneWidget);
+      expect(find.text('Description about your company'), findsOneWidget);
+      expect(find.text(store.companyDescription), findsOneWidget);
 
-    // Enter a new company description
-    final descField = find.widgetWithText(TextField, store.companyDescription);
-    await tester.ensureVisible(descField);
-    await tester.enterText(descField, 'LNBTI Higher Education Campus');
-    await tester.pumpAndSettle();
+      // Enter a new company description
+      final descField = find.widgetWithText(
+        TextField,
+        store.companyDescription,
+      );
+      await tester.ensureVisible(descField);
+      await tester.enterText(descField, 'LNBTI Higher Education Campus');
+      await tester.pumpAndSettle();
 
-    final saveFinder = find.text('Save Key');
-    await tester.ensureVisible(saveFinder);
-    await tester.tap(saveFinder);
-    await tester.pumpAndSettle();
+      final saveFinder = find.text('Save Key');
+      await tester.ensureVisible(saveFinder);
+      await tester.tap(saveFinder);
+      await tester.pumpAndSettle();
 
-    expect(await store.readCompanyDescription(), 'LNBTI Higher Education Campus');
-  });
+      expect(
+        await store.readCompanyDescription(),
+        'LNBTI Higher Education Campus',
+      );
+    },
+  );
 
-  testWidgets('GeminiAiMessageSheet displays representation badge on behalf of LNBTI', (tester) async {
-    final store = MemoryAppSettingsStore();
-    final service = GeminiService();
+  testWidgets(
+    'GeminiAiMessageSheet displays representation badge on behalf of LNBTI',
+    (tester) async {
+      final store = MemoryAppSettingsStore();
+      final service = GeminiService();
 
-    const student = Student(
-      name: 'Saman Kumara',
-      phone: '0779988776',
-      callStatus: 'Interested',
-    );
+      const student = Student(
+        name: 'Saman Kumara',
+        phone: '0779988776',
+        callStatus: 'Interested',
+      );
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: GeminiAiMessageSheet(
-            student: student,
-            initialApiKey: 'test_key',
-            settingsStore: store,
-            geminiService: service,
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GeminiAiMessageSheet(
+              student: student,
+              initialApiKey: 'test_key',
+              settingsStore: store,
+              geminiService: service,
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.textContaining('On behalf of: LNBTI'), findsOneWidget);
-  });
+      expect(find.textContaining('On behalf of: LNBTI'), findsOneWidget);
+    },
+  );
 
   test('tryParseDate parses ISO, AM/PM, and slash date formats correctly', () {
     expect(tryParseDate('2026-11-17T14:30:00'), DateTime(2026, 11, 17, 14, 30));
@@ -2984,112 +3030,114 @@ void main() {
   });
 
   testWidgets(
-      'Lead with overdue reminder from yesterday displays overdue notice and quick chips in EditStudentSheet',
-      (tester) async {
-    final yesterday = DateTime.now().subtract(const Duration(days: 1));
-    final student = Student(
-      name: 'Nalaka Silva',
-      phone: '0773344556',
-      callStatus: 'Call Back',
-      nextCallDateTime: yesterday.toIso8601String(),
-    );
+    'Lead with overdue reminder from yesterday displays overdue notice and quick chips in EditStudentSheet',
+    (tester) async {
+      final yesterday = DateTime.now().subtract(const Duration(days: 1));
+      final student = Student(
+        name: 'Nalaka Silva',
+        phone: '0773344556',
+        callStatus: 'Call Back',
+        nextCallDateTime: yesterday.toIso8601String(),
+      );
 
-    Student? updatedResult;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder: (context) => ElevatedButton(
-              onPressed: () async {
-                updatedResult = await showModalBottomSheet<Student>(
-                  context: context,
-                  isScrollControlled: true,
-                  builder: (_) => EditStudentSheet(student: student),
-                );
-              },
-              child: const Text('Open Edit'),
+      Student? updatedResult;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () async {
+                  updatedResult = await showModalBottomSheet<Student>(
+                    context: context,
+                    isScrollControlled: true,
+                    builder: (_) => EditStudentSheet(student: student),
+                  );
+                },
+                child: const Text('Open Edit'),
+              ),
             ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Open Edit'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Open Edit'));
+      await tester.pumpAndSettle();
 
-    // Verify overdue indication
-    expect(find.textContaining('Overdue:'), findsOneWidget);
-    expect(find.text('+1 hr'), findsOneWidget);
-    expect(find.text('+3 hrs'), findsOneWidget);
-    expect(find.text('Tomorrow 10 AM'), findsOneWidget);
+      // Verify overdue indication
+      expect(find.textContaining('Overdue:'), findsOneWidget);
+      expect(find.text('+1 hr'), findsOneWidget);
+      expect(find.text('+3 hrs'), findsOneWidget);
+      expect(find.text('Tomorrow 10 AM'), findsOneWidget);
 
-    // Tap +1 hr quick shortcut
-    await tester.ensureVisible(find.text('+1 hr'));
-    await tester.tap(find.text('+1 hr'));
-    await tester.pumpAndSettle();
+      // Tap +1 hr quick shortcut
+      await tester.ensureVisible(find.text('+1 hr'));
+      await tester.tap(find.text('+1 hr'));
+      await tester.pumpAndSettle();
 
-    // Overdue warning should be replaced by the new scheduled future time
-    expect(find.textContaining('Overdue:'), findsNothing);
+      // Overdue warning should be replaced by the new scheduled future time
+      expect(find.textContaining('Overdue:'), findsNothing);
 
-    // Save
-    await tester.ensureVisible(find.text('Update Details'));
-    await tester.tap(find.text('Update Details'));
-    await tester.pumpAndSettle();
+      // Save
+      await tester.ensureVisible(find.text('Update Details'));
+      await tester.tap(find.text('Update Details'));
+      await tester.pumpAndSettle();
 
-    expect(updatedResult, isNotNull);
-    final parsedNextCall = tryParseDate(updatedResult!.nextCallDateTime);
-    expect(parsedNextCall, isNotNull);
-    expect(parsedNextCall!.isAfter(DateTime.now()), isTrue);
-  });
+      expect(updatedResult, isNotNull);
+      final parsedNextCall = tryParseDate(updatedResult!.nextCallDateTime);
+      expect(parsedNextCall, isNotNull);
+      expect(parsedNextCall!.isAfter(DateTime.now()), isTrue);
+    },
+  );
 
   testWidgets(
-      'Saving lead with overdue reminder without setting new future reminder clears nextCallDateTime',
-      (tester) async {
-    final yesterday = DateTime.now().subtract(const Duration(days: 1));
-    final student = Student(
-      name: 'Sunil Shantha',
-      phone: '0715566778',
-      callStatus: 'No Answer',
-      nextCallDateTime: yesterday.toIso8601String(),
-    );
+    'Saving lead with overdue reminder without setting new future reminder clears nextCallDateTime',
+    (tester) async {
+      final yesterday = DateTime.now().subtract(const Duration(days: 1));
+      final student = Student(
+        name: 'Sunil Shantha',
+        phone: '0715566778',
+        callStatus: 'No Answer',
+        nextCallDateTime: yesterday.toIso8601String(),
+      );
 
-    Student? updatedResult;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder: (context) => ElevatedButton(
-              onPressed: () async {
-                updatedResult = await showModalBottomSheet<Student>(
-                  context: context,
-                  isScrollControlled: true,
-                  builder: (_) => EditStudentSheet(student: student),
-                );
-              },
-              child: const Text('Open Edit'),
+      Student? updatedResult;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () async {
+                  updatedResult = await showModalBottomSheet<Student>(
+                    context: context,
+                    isScrollControlled: true,
+                    builder: (_) => EditStudentSheet(student: student),
+                  );
+                },
+                child: const Text('Open Edit'),
+              ),
             ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Open Edit'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Open Edit'));
+      await tester.pumpAndSettle();
 
-    // Overdue warning is present
-    expect(find.textContaining('Overdue:'), findsOneWidget);
+      // Overdue warning is present
+      expect(find.textContaining('Overdue:'), findsOneWidget);
 
-    // Save directly without picking a new reminder
-    await tester.ensureVisible(find.text('Update Details'));
-    await tester.tap(find.text('Update Details'));
-    await tester.pumpAndSettle();
+      // Save directly without picking a new reminder
+      await tester.ensureVisible(find.text('Update Details'));
+      await tester.tap(find.text('Update Details'));
+      await tester.pumpAndSettle();
 
-    expect(updatedResult, isNotNull);
-    // nextCallDateTime must be empty string so past reminder is not preserved
-    expect(updatedResult!.nextCallDateTime, isEmpty);
-  });
+      expect(updatedResult, isNotNull);
+      // nextCallDateTime must be empty string so past reminder is not preserved
+      expect(updatedResult!.nextCallDateTime, isEmpty);
+    },
+  );
 
   test('GeminiService.polishRemark rewrites broken or rough remarks into clear CRM English', () async {
     String? capturedPrompt;
@@ -3106,13 +3154,12 @@ void main() {
               'content': {
                 'parts': [
                   {
-                    'text':
-                        'Student did not answer; requested a follow-up call tomorrow at 4:00 PM.',
-                  }
-                ]
-              }
-            }
-          ]
+                    'text': 'Student did not answer; requested a follow-up call tomorrow at 4:00 PM.',
+                  },
+                ],
+              },
+            },
+          ],
         }),
         200,
         headers: {'content-type': 'application/json'},
@@ -3129,253 +3176,303 @@ void main() {
       polished,
       'Student did not answer; requested a follow-up call tomorrow at 4:00 PM.',
     );
-    expect(capturedPrompt, contains('ans kale na he told to call tomorrow 4pm'));
+    expect(
+      capturedPrompt,
+      contains('ans kale na he told to call tomorrow 4pm'),
+    );
     expect(capturedPrompt, contains('Rewrite and polish this raw remark'));
   });
 
-  testWidgets('EditStudentSheet allows polishing raw remarks with AI and supports Undo', (tester) async {
-    tester.view.physicalSize = const Size(800, 1400);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(() {
-      tester.view.resetPhysicalSize();
-      tester.view.resetDevicePixelRatio();
-    });
+  testWidgets(
+    'EditStudentSheet allows polishing raw remarks with AI and supports Undo',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
 
-    final store = MemoryAppSettingsStore();
-    await store.saveGeminiApiKey('test_key');
+      final store = MemoryAppSettingsStore();
+      await store.saveGeminiApiKey('test_key');
 
-    final mockClient = MockClient((request) async {
-      return http.Response(
-        jsonEncode({
-          'candidates': [
-            {
-              'content': {
-                'parts': [
-                  {
-                    'text':
-                        'Interested in Software Engineering; requested evening callback.',
-                  }
-                ]
-              }
-            }
-          ]
-        }),
-        200,
-        headers: {'content-type': 'application/json'},
-      );
-    });
+      final mockClient = MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {
+                      'text': 'Interested in Software Engineering; requested evening callback.',
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
 
-    final service = GeminiService(client: mockClient);
-    const student = Student(
-      name: 'Nimal Perera',
-      phone: '0712233445',
-    );
+      final service = GeminiService(client: mockClient);
+      const student = Student(name: 'Nimal Perera', phone: '0712233445');
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: SingleChildScrollView(
-            child: EditStudentSheet(
-              student: student,
-              settingsStore: store,
-              geminiService: service,
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    final polishBtn = find.byKey(const Key('polish_remark_button'));
-    await tester.ensureVisible(polishBtn);
-
-    // 1. Tapping when empty shows a notice
-    await tester.tap(polishBtn);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('Please type your raw or draft remark first.'), findsOneWidget);
-
-    // 2. Enter rough remark
-    final remarkField = find.widgetWithText(TextFormField, 'Call remark (optional)');
-    await tester.enterText(remarkField, 'student kata kala se degree kamathi kiwwa hawasa call ganna');
-    await tester.pump();
-
-    // 3. Tap Polish English (AI)
-    await tester.ensureVisible(polishBtn);
-    await tester.tap(polishBtn);
-    await tester.pump(); // starts loading
-    await tester.pump(); // completes Future
-    await tester.pump(); // setState with polished text & calls showSnackBar
-    await tester.pump(); // starts SnackBar entry animation
-    await tester.pump(const Duration(milliseconds: 350)); // finishes slide-in animation
-
-    // Field should now have polished English
-    expect(find.text('Interested in Software Engineering; requested evening callback.'), findsOneWidget);
-    expect(find.text('✨ Remark polished into clear English!'), findsOneWidget);
-
-    // 4. Tap Undo on SnackBar
-    final undoFinder = find.byType(SnackBarAction);
-    expect(undoFinder, findsOneWidget);
-    expect(find.text('Undo'), findsOneWidget);
-    tester.widget<SnackBarAction>(undoFinder).onPressed.call();
-    await tester.pump();
-
-    // Reverted back to raw text
-    expect(find.text('student kata kala se degree kamathi kiwwa hawasa call ganna'), findsOneWidget);
-  });
-
-  testWidgets('EditStudentSheet supports voice-to-text dictation and seamless AI polish', (tester) async {
-    final mockVoice = MockVoiceToTextService(
-      mockWords: 'katha kala degree fees ahuwa',
-    );
-    final store = MemoryAppSettingsStore();
-    await store.saveGeminiApiKey('test_key');
-
-    final mockClient = MockClient((request) async {
-      return http.Response(
-        jsonEncode({
-          'candidates': [
-            {
-              'content': {
-                'parts': [
-                  {
-                    'text': 'Contacted student regarding degree fee structure.',
-                  }
-                ]
-              }
-            }
-          ]
-        }),
-        200,
-        headers: {'content-type': 'application/json'},
-      );
-    });
-
-    final gemini = GeminiService(client: mockClient);
-    const student = Student(name: 'Sunil Silva', phone: '0771234567');
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: SingleChildScrollView(
-            child: EditStudentSheet(
-              student: student,
-              settingsStore: store,
-              geminiService: gemini,
-              voiceToTextService: mockVoice,
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    final voiceBtn = find.byKey(const Key('voice_to_text_button'));
-    final langToggle = find.byKey(const Key('voice_language_toggle'));
-    expect(voiceBtn, findsOneWidget);
-    expect(langToggle, findsOneWidget);
-    expect(find.text('සිංහල'), findsOneWidget);
-    expect(find.text('🎙️ Speak'), findsOneWidget);
-
-    // Toggle language from Sinhala to English and back
-    await tester.ensureVisible(langToggle);
-    await tester.tap(langToggle);
-    await tester.pump();
-    expect(find.text('English'), findsOneWidget);
-
-    await tester.tap(langToggle);
-    await tester.pump();
-    expect(find.text('සිංහල'), findsOneWidget);
-
-    // 1. Tap Speak button
-    await tester.ensureVisible(voiceBtn);
-    await tester.tap(voiceBtn);
-    await tester.pump();
-
-    expect(mockVoice.listenCallCount, 1);
-    expect(find.text('katha kala degree fees ahuwa'), findsOneWidget);
-
-    // 2. Tap Polish button to polish the dictated speech
-    final polishBtn = find.byKey(const Key('polish_remark_button'));
-    await tester.ensureVisible(polishBtn);
-    await tester.tap(polishBtn);
-    await tester.pump();
-    await tester.pump();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 350));
-
-    expect(find.text('Contacted student regarding degree fee structure.'), findsOneWidget);
-    expect(find.text('✨ Remark polished into clear English!'), findsOneWidget);
-  });
-
-  testWidgets('StudentHistoryDialog supports voice-to-text when editing last comment', (tester) async {
-    final mockVoice = MockVoiceToTextService(
-      mockWords: 'father will visit campus next week',
-    );
-    final store = MemoryAppSettingsStore();
-
-    Student student = const Student(
-      name: 'Kamal Gunawardena',
-      phone: '0719876543',
-      commentHistory: ['2026-11-18 10:00: Initial call made'],
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder: (context) => ElevatedButton(
-              onPressed: () => showDialog<void>(
-                context: context,
-                builder: (_) => StudentHistoryDialog(
-                  student: student,
-                  title: 'History',
-                  settingsStore: store,
-                  voiceToTextService: mockVoice,
-                  onStudentUpdated: (updated) async {
-                    student = updated;
-                  },
-                ),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: EditStudentSheet(
+                student: student,
+                settingsStore: store,
+                geminiService: service,
               ),
-              child: const Text('Open History'),
             ),
           ),
         ),
-      ),
-    );
+      );
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Open History'));
-    await tester.pumpAndSettle();
+      final polishBtn = find.byKey(const Key('polish_remark_button'));
+      await tester.ensureVisible(polishBtn);
 
-    final editBtn = find.text('Edit last remark');
-    expect(editBtn, findsOneWidget);
-    await tester.tap(editBtn);
-    await tester.pumpAndSettle();
+      // 1. Tapping when empty shows a notice
+      await tester.tap(polishBtn);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        find.text('Please type your raw or draft remark first.'),
+        findsOneWidget,
+      );
 
-    expect(find.text('Edit Last Remark'), findsOneWidget);
+      // 2. Enter rough remark
+      final remarkField = find.widgetWithText(
+        TextFormField,
+        'Call remark (optional)',
+      );
+      await tester.enterText(
+        remarkField,
+        'student kata kala se degree kamathi kiwwa hawasa call ganna',
+      );
+      await tester.pump();
 
-    final speakBtn = find.text('🎙️ Speak');
-    expect(speakBtn, findsOneWidget);
-    await tester.tap(speakBtn);
-    await tester.pump();
+      // 3. Tap Polish English (AI)
+      await tester.ensureVisible(polishBtn);
+      await tester.tap(polishBtn);
+      await tester.pump(); // starts loading
+      await tester.pump(); // completes Future
+      await tester.pump(); // setState with polished text & calls showSnackBar
+      await tester.pump(); // starts SnackBar entry animation
+      await tester.pump(
+        const Duration(milliseconds: 350),
+      ); // finishes slide-in animation
 
-    expect(mockVoice.listenCallCount, 1);
-    expect(find.text('2026-11-18 10:00: Initial call made father will visit campus next week'), findsOneWidget);
+      // Field should now have polished English
+      expect(
+        find.text(
+          'Interested in Software Engineering; requested evening callback.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text('✨ Remark polished into clear English!'),
+        findsOneWidget,
+      );
 
-    await tester.tap(find.text('Save'));
-    await tester.pumpAndSettle();
+      // 4. Tap Undo on SnackBar
+      final undoFinder = find.byType(SnackBarAction);
+      expect(undoFinder, findsOneWidget);
+      expect(find.text('Undo'), findsOneWidget);
+      tester.widget<SnackBarAction>(undoFinder).onPressed.call();
+      await tester.pump();
 
-    expect(student.commentHistory.last, contains('father will visit campus next week'));
-  });
+      // Reverted back to raw text
+      expect(
+        find.text(
+          'student kata kala se degree kamathi kiwwa hawasa call ganna',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
 
-  test('AppUpdateService.compareVersions compares semantic versions accurately', () {
-    expect(AppUpdateService.compareVersions('1.16.2', '1.17.0'), 1);
-    expect(AppUpdateService.compareVersions('1.17.0', '1.16.2'), -1);
-    expect(AppUpdateService.compareVersions('1.17.0', '1.17.0'), 0);
-    expect(AppUpdateService.compareVersions('v1.17.0+33', 'v1.17.1'), 1);
-    expect(AppUpdateService.compareVersions('1.17.0', '2.0.0'), 1);
-    expect(AppUpdateService.compareVersions('1.17.0', '1.16.99'), -1);
-  });
+  testWidgets(
+    'EditStudentSheet supports voice-to-text dictation and seamless AI polish',
+    (tester) async {
+      final mockVoice = MockVoiceToTextService(
+        mockWords: 'katha kala degree fees ahuwa',
+      );
+      final store = MemoryAppSettingsStore();
+      await store.saveGeminiApiKey('test_key');
+
+      final mockClient = MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {
+                      'text':
+                          'Contacted student regarding degree fee structure.',
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final gemini = GeminiService(client: mockClient);
+      const student = Student(name: 'Sunil Silva', phone: '0771234567');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: EditStudentSheet(
+                student: student,
+                settingsStore: store,
+                geminiService: gemini,
+                voiceToTextService: mockVoice,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final voiceBtn = find.byKey(const Key('voice_to_text_button'));
+      final langToggle = find.byKey(const Key('voice_language_toggle'));
+      expect(voiceBtn, findsOneWidget);
+      expect(langToggle, findsOneWidget);
+      expect(find.text('සිංහල'), findsOneWidget);
+      expect(find.text('🎙️ Speak'), findsOneWidget);
+
+      // Toggle language from Sinhala to English and back
+      await tester.ensureVisible(langToggle);
+      await tester.tap(langToggle);
+      await tester.pump();
+      expect(find.text('English'), findsOneWidget);
+
+      await tester.tap(langToggle);
+      await tester.pump();
+      expect(find.text('සිංහල'), findsOneWidget);
+
+      // 1. Tap Speak button
+      await tester.ensureVisible(voiceBtn);
+      await tester.tap(voiceBtn);
+      await tester.pump();
+
+      expect(mockVoice.listenCallCount, 1);
+      expect(find.text('katha kala degree fees ahuwa'), findsOneWidget);
+
+      // 2. Tap Polish button to polish the dictated speech
+      final polishBtn = find.byKey(const Key('polish_remark_button'));
+      await tester.ensureVisible(polishBtn);
+      await tester.tap(polishBtn);
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+
+      expect(
+        find.text('Contacted student regarding degree fee structure.'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('✨ Remark polished into clear English!'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'StudentHistoryDialog supports voice-to-text when editing last comment',
+    (tester) async {
+      final mockVoice = MockVoiceToTextService(
+        mockWords: 'father will visit campus next week',
+      );
+      final store = MemoryAppSettingsStore();
+
+      Student student = const Student(
+        name: 'Kamal Gunawardena',
+        phone: '0719876543',
+        commentHistory: ['2026-11-18 10:00: Initial call made'],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => StudentHistoryDialog(
+                    student: student,
+                    title: 'History',
+                    settingsStore: store,
+                    voiceToTextService: mockVoice,
+                    onStudentUpdated: (updated) async {
+                      student = updated;
+                    },
+                  ),
+                ),
+                child: const Text('Open History'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open History'));
+      await tester.pumpAndSettle();
+
+      final editBtn = find.text('Edit last remark');
+      expect(editBtn, findsOneWidget);
+      await tester.tap(editBtn);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Edit Last Remark'), findsOneWidget);
+
+      final speakBtn = find.text('🎙️ Speak');
+      expect(speakBtn, findsOneWidget);
+      await tester.tap(speakBtn);
+      await tester.pump();
+
+      expect(mockVoice.listenCallCount, 1);
+      expect(
+        find.text(
+          '2026-11-18 10:00: Initial call made father will visit campus next week',
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(
+        student.commentHistory.last,
+        contains('father will visit campus next week'),
+      );
+    },
+  );
+
+  test(
+    'AppUpdateService.compareVersions compares semantic versions accurately',
+    () {
+      expect(AppUpdateService.compareVersions('1.16.2', '1.17.0'), 1);
+      expect(AppUpdateService.compareVersions('1.17.0', '1.16.2'), -1);
+      expect(AppUpdateService.compareVersions('1.17.0', '1.17.0'), 0);
+      expect(AppUpdateService.compareVersions('v1.17.0+33', 'v1.17.1'), 1);
+      expect(AppUpdateService.compareVersions('1.17.0', '2.0.0'), 1);
+      expect(AppUpdateService.compareVersions('1.17.0', '1.16.99'), -1);
+    },
+  );
 
   test('AppUpdateService.checkForUpdates parses GitHub release and assets correctly', () async {
     final mockClient = MockClient((request) async {
@@ -3385,14 +3482,15 @@ void main() {
           'tag_name': 'v1.18.0',
           'name': 'LeadPilot v1.18.0 - Direct Updates',
           'body': '### What\'s New\n* Added in-app updater\n* Bug fixes',
-          'html_url': 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.18.0',
+          'html_url':
+              'https://github.com/jiatachira/LeadPilot/releases/tag/v1.18.0',
           'published_at': '2026-11-20T08:00:00Z',
           'assets': [
             {
               'name': 'app-release.apk',
               'browser_download_url': 'https://github.com/jiatachira/LeadPilot/releases/download/v1.18.0/app-release.apk',
               'size': 63892011,
-            }
+            },
           ],
         }),
         200,
@@ -3404,157 +3502,173 @@ void main() {
 
     expect(info.hasUpdate, isTrue);
     expect(info.latestVersion, '1.18.0');
-    expect(info.downloadUrl, 'https://github.com/jiatachira/LeadPilot/releases/download/v1.18.0/app-release.apk');
+    expect(
+      info.downloadUrl,
+      'https://github.com/jiatachira/LeadPilot/releases/download/v1.18.0/app-release.apk',
+    );
     expect(info.releaseTitle, 'LeadPilot v1.18.0 - Direct Updates');
     expect(info.releaseNotes, contains('Added in-app updater'));
     expect(info.apkSize, 63892011);
   });
 
-  test('AppUpdateService.checkForUpdates handles 404 no releases gracefully', () async {
-    final mockClient = MockClient((request) async {
-      return http.Response('{"message":"Not Found"}', 404);
-    });
+  test(
+    'AppUpdateService.checkForUpdates handles 404 no releases gracefully',
+    () async {
+      final mockClient = MockClient((request) async {
+        return http.Response('{"message":"Not Found"}', 404);
+      });
 
-    final service = AppUpdateService(client: mockClient);
-    final info = await service.checkForUpdates(currentVersion: '1.17.0');
+      final service = AppUpdateService(client: mockClient);
+      final info = await service.checkForUpdates(currentVersion: '1.17.0');
 
-    expect(info.hasUpdate, isFalse);
-    expect(info.currentVersion, '1.17.0');
-  });
+      expect(info.hasUpdate, isFalse);
+      expect(info.currentVersion, '1.17.0');
+    },
+  );
 
-  testWidgets('showAppUpdateDialog renders details, downloads with progress, and triggers installer', (tester) async {
-    String installedPath = '';
-    const updateInfo = AppUpdateInfo(
-      currentVersion: '1.17.0',
-      latestVersion: '1.18.0',
-      hasUpdate: true,
-      releaseTitle: 'LeadPilot v1.18.0',
-      releaseNotes: 'Performance improvements and bug fixes.',
-      downloadUrl: 'https://example.com/app-release.apk',
-      releaseUrl: 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.18.0',
-      apkSize: 2048,
-    );
-
-    final mockHttpClient = MockClient((request) async {
-      return http.Response.bytes(
-        List<int>.filled(2048, 42),
-        200,
-        headers: {'content-length': '2048'},
+  testWidgets(
+    'showAppUpdateDialog renders details, downloads with progress, and triggers installer',
+    (tester) async {
+      String installedPath = '';
+      const updateInfo = AppUpdateInfo(
+        currentVersion: '1.17.0',
+        latestVersion: '1.18.0',
+        hasUpdate: true,
+        releaseTitle: 'LeadPilot v1.18.0',
+        releaseNotes: 'Performance improvements and bug fixes.',
+        downloadUrl: 'https://example.com/app-release.apk',
+        releaseUrl:
+            'https://github.com/jiatachira/LeadPilot/releases/tag/v1.18.0',
+        apkSize: 2048,
       );
-    });
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Builder(
-          builder: (context) => Scaffold(
-            body: Center(
-              child: ElevatedButton(
-                onPressed: () => showAppUpdateDialog(
-                  context,
-                  updateInfo,
-                  httpClient: mockHttpClient,
-                  onInstallApk: (path) async {
-                    installedPath = path;
-                  },
-                ),
-                child: const Text('Show Dialog'),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-
-    await tester.tap(find.text('Show Dialog'));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('app_update_dialog')), findsOneWidget);
-    expect(find.text('New Update Available'), findsOneWidget);
-    expect(find.text('v1.17.0'), findsOneWidget);
-    expect(find.text('v1.18.0'), findsOneWidget);
-    expect(find.text("What's New:"), findsOneWidget);
-    expect(find.text('Performance improvements and bug fixes.'), findsOneWidget);
-
-    final updateNowBtn = find.byKey(const Key('update_now_button'));
-    expect(updateNowBtn, findsOneWidget);
-    await tester.tap(updateNowBtn);
-    await tester.pump();
-    await tester.runAsync(() async {
-      await Future.delayed(const Duration(milliseconds: 100));
-    });
-    await tester.pumpAndSettle();
-
-    expect(installedPath.endsWith('LeadPilot-update.apk'), isTrue);
-    expect(find.text('Update Ready!'), findsOneWidget);
-    expect(find.byKey(const Key('install_now_button')), findsOneWidget);
-  });
-
-  testWidgets('Settings displays App Updates card and allows manual check and toggle', (tester) async {
-    final store = MemoryAppSettingsStore();
-    final updateService = AppUpdateService(
-      client: MockClient((request) async {
-        return http.Response(
-          jsonEncode({
-            'tag_name': 'v1.18.2',
-            'name': 'LeadPilot v1.18.2',
-            'body': 'Current release',
-            'html_url': 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.18.2',
-            'assets': [],
-          }),
+      final mockHttpClient = MockClient((request) async {
+        return http.Response.bytes(
+          List<int>.filled(2048, 42),
           200,
+          headers: {'content-length': '2048'},
         );
-      }),
-    );
+      });
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder: (context) => ElevatedButton(
-              onPressed: () => showModalBottomSheet<void>(
-                context: context,
-                isScrollControlled: true,
-                builder: (_) => SettingsHubSheet(
-                  themeMode: ThemeMode.system,
-                  onThemeModeChanged: (_) async {},
-                  isSheetConnected: true,
-                  hasActiveFilters: false,
-                  biometricEnabled: false,
-                  onBiometricChanged: (_) async {},
-                  settingsStore: store,
-                  updateService: updateService,
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () => showAppUpdateDialog(
+                    context,
+                    updateInfo,
+                    httpClient: mockHttpClient,
+                    onInstallApk: (path) async {
+                      installedPath = path;
+                    },
+                  ),
+                  child: const Text('Show Dialog'),
                 ),
               ),
-              child: const Text('Open Settings'),
             ),
           ),
         ),
-      ),
-    );
+      );
 
-    await tester.tap(find.text('Open Settings'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Show Dialog'));
+      await tester.pumpAndSettle();
 
-    final checkBtn = find.byKey(const Key('check_updates_button'));
-    await tester.ensureVisible(checkBtn);
-    await tester.pumpAndSettle();
+      expect(find.byKey(const Key('app_update_dialog')), findsOneWidget);
+      expect(find.text('New Update Available'), findsOneWidget);
+      expect(find.text('v1.17.0'), findsOneWidget);
+      expect(find.text('v1.18.0'), findsOneWidget);
+      expect(find.text("What's New:"), findsOneWidget);
+      expect(
+        find.text('Performance improvements and bug fixes.'),
+        findsOneWidget,
+      );
 
-    expect(find.text('App Updates'), findsOneWidget);
-    expect(find.text('Check for Updates'), findsOneWidget);
-    expect(find.text('Auto-check on Startup'), findsOneWidget);
+      final updateNowBtn = find.byKey(const Key('update_now_button'));
+      expect(updateNowBtn, findsOneWidget);
+      await tester.tap(updateNowBtn);
+      await tester.pump();
+      await tester.runAsync(() async {
+        await Future.delayed(const Duration(milliseconds: 100));
+      });
+      await tester.pumpAndSettle();
 
-    // Tap Check for Updates
-    await tester.tap(checkBtn);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 350));
-    expect(find.text('LeadPilot is up to date (v1.21.0).'), findsOneWidget);
+      expect(installedPath.endsWith('LeadPilot-update.apk'), isTrue);
+      expect(find.text('Update Ready!'), findsOneWidget);
+      expect(find.byKey(const Key('install_now_button')), findsOneWidget);
+    },
+  );
 
-    // Toggle Auto-check
-    final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
-    await tester.tap(switchFinder);
-    await tester.pump();
-    expect(await store.readAutoCheckUpdates(), isFalse);
-  });
+  testWidgets(
+    'Settings displays App Updates card and allows manual check and toggle',
+    (tester) async {
+      final store = MemoryAppSettingsStore();
+      final updateService = AppUpdateService(
+        client: MockClient((request) async {
+          return http.Response(
+            jsonEncode({
+              'tag_name': 'v1.18.2',
+              'name': 'LeadPilot v1.18.2',
+              'body': 'Current release',
+              'html_url': 'https://github.com/jiatachira/LeadPilot/releases/tag/v1.18.2',
+              'assets': [],
+            }),
+            200,
+          );
+        }),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => SettingsHubSheet(
+                    themeMode: ThemeMode.system,
+                    onThemeModeChanged: (_) async {},
+                    isSheetConnected: true,
+                    hasActiveFilters: false,
+                    biometricEnabled: false,
+                    onBiometricChanged: (_) async {},
+                    settingsStore: store,
+                    updateService: updateService,
+                  ),
+                ),
+                child: const Text('Open Settings'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open Settings'));
+      await tester.pumpAndSettle();
+
+      final checkBtn = find.byKey(const Key('check_updates_button'));
+      await tester.ensureVisible(checkBtn);
+      await tester.pumpAndSettle();
+
+      expect(find.text('App Updates'), findsOneWidget);
+      expect(find.text('Check for Updates'), findsOneWidget);
+      expect(find.text('Auto-check on Startup'), findsOneWidget);
+
+      // Tap Check for Updates
+      await tester.tap(checkBtn);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(find.text('LeadPilot is up to date (v1.22.0).'), findsOneWidget);
+
+      // Toggle Auto-check
+      final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
+      await tester.tap(switchFinder);
+      await tester.pump();
+      expect(await store.readAutoCheckUpdates(), isFalse);
+    },
+  );
 
   test('formatStudentHistoryForPrompt includes all chronological call attempts, dates, and statuses', () {
     const studentWithHistory = Student(
@@ -3574,9 +3688,7 @@ void main() {
           comment: 'Spoke with mother; student is doing 2026 A/L Maths',
         ),
       ],
-      commentHistory: [
-        '2026-11-08 — Web form lead received',
-      ],
+      commentHistory: ['2026-11-08 — Web form lead received'],
     );
 
     final historyText = formatStudentHistoryForPrompt(studentWithHistory);
@@ -3602,11 +3714,11 @@ void main() {
             {
               'content': {
                 'parts': [
-                  {'text': 'Hi Nimal! Following up from LNBTI.'}
-                ]
-              }
-            }
-          ]
+                  {'text': 'Hi Nimal! Following up from LNBTI.'},
+                ],
+              },
+            },
+          ],
         }),
         200,
         headers: {'content-type': 'application/json'},
@@ -3627,7 +3739,8 @@ void main() {
         CallAttempt(
           dateTime: '2026-11-16 03:30 PM',
           status: 'Interested',
-          comment: 'Asked for Software Engineering degree fees and Japanese classes',
+          comment:
+              'Asked for Software Engineering degree fees and Japanese classes',
         ),
       ],
     );
@@ -3638,80 +3751,91 @@ void main() {
       language: 'English',
     );
 
-    expect(capturedPrompt, contains('Complete Call & Interaction History (Chronological):'));
+    expect(
+      capturedPrompt,
+      contains('Complete Call & Interaction History (Chronological):'),
+    );
     expect(capturedPrompt, contains('2026-11-14 09:00 AM'));
     expect(capturedPrompt, contains('Line busy'));
     expect(capturedPrompt, contains('2026-11-16 03:30 PM'));
-    expect(capturedPrompt, contains('Software Engineering degree fees and Japanese classes'));
+    expect(
+      capturedPrompt,
+      contains('Software Engineering degree fees and Japanese classes'),
+    );
     expect(capturedPrompt, contains('USE OF COMPLETE CALL HISTORY'));
   });
 
-  testWidgets('GeminiAiMessageSheet displays past interactions count analyzed by AI', (tester) async {
-    final store = MemoryAppSettingsStore();
-    const student = Student(
-      name: 'Saman Kumara',
-      phone: '0712345678',
-      callStatus: 'Interested',
-      attempts: [
-        CallAttempt(
-          dateTime: '2026-11-15 10:00 AM',
-          status: 'No Answer',
-          comment: 'No reply',
-        ),
-        CallAttempt(
-          dateTime: '2026-11-18 11:30 AM',
-          status: 'Interested',
-          comment: 'Requested brochure',
-        ),
-      ],
-    );
+  testWidgets(
+    'GeminiAiMessageSheet displays past interactions count analyzed by AI',
+    (tester) async {
+      final store = MemoryAppSettingsStore();
+      const student = Student(
+        name: 'Saman Kumara',
+        phone: '0712345678',
+        callStatus: 'Interested',
+        attempts: [
+          CallAttempt(
+            dateTime: '2026-11-15 10:00 AM',
+            status: 'No Answer',
+            comment: 'No reply',
+          ),
+          CallAttempt(
+            dateTime: '2026-11-18 11:30 AM',
+            status: 'Interested',
+            comment: 'Requested brochure',
+          ),
+        ],
+      );
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: GeminiAiMessageSheet(
-            student: student,
-            initialApiKey: 'test_api_key',
-            settingsStore: store,
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GeminiAiMessageSheet(
+              student: student,
+              initialApiKey: 'test_api_key',
+              settingsStore: store,
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pump();
+      );
+      await tester.pump();
 
-    expect(find.text('2 past interaction(s) analyzed by AI'), findsOneWidget);
-    expect(find.textContaining('Requested brochure'), findsOneWidget);
-  });
+      expect(find.text('2 past interaction(s) analyzed by AI'), findsOneWidget);
+      expect(find.textContaining('Requested brochure'), findsOneWidget);
+    },
+  );
 
-  test('WhatsAppTemplate supports document attachments and JSON serialization',
-      () {
-    const templateWithDoc = WhatsAppTemplate(
-      id: 'doc_1',
-      name: 'Brochure Template',
-      message: 'Hello {name}, find attached the syllabus.',
-      documentPath: '/storage/syllabus.pdf',
-      documentName: 'syllabus.pdf',
-    );
+  test(
+    'WhatsAppTemplate supports document attachments and JSON serialization',
+    () {
+      const templateWithDoc = WhatsAppTemplate(
+        id: 'doc_1',
+        name: 'Brochure Template',
+        message: 'Hello {name}, find attached the syllabus.',
+        documentPath: '/storage/syllabus.pdf',
+        documentName: 'syllabus.pdf',
+      );
 
-    expect(templateWithDoc.hasDocument, isTrue);
-    expect(templateWithDoc.documentPath, '/storage/syllabus.pdf');
-    expect(templateWithDoc.documentName, 'syllabus.pdf');
+      expect(templateWithDoc.hasDocument, isTrue);
+      expect(templateWithDoc.documentPath, '/storage/syllabus.pdf');
+      expect(templateWithDoc.documentName, 'syllabus.pdf');
 
-    final json = templateWithDoc.toJson();
-    expect(json['documentPath'], '/storage/syllabus.pdf');
-    expect(json['documentName'], 'syllabus.pdf');
+      final json = templateWithDoc.toJson();
+      expect(json['documentPath'], '/storage/syllabus.pdf');
+      expect(json['documentName'], 'syllabus.pdf');
 
-    final fromJson = WhatsAppTemplate.fromJson(json);
-    expect(fromJson.hasDocument, isTrue);
-    expect(fromJson.name, 'Brochure Template');
-    expect(fromJson.documentPath, '/storage/syllabus.pdf');
-    expect(fromJson.documentName, 'syllabus.pdf');
+      final fromJson = WhatsAppTemplate.fromJson(json);
+      expect(fromJson.hasDocument, isTrue);
+      expect(fromJson.name, 'Brochure Template');
+      expect(fromJson.documentPath, '/storage/syllabus.pdf');
+      expect(fromJson.documentName, 'syllabus.pdf');
 
-    final cleared = templateWithDoc.copyWith(clearDocument: true);
-    expect(cleared.hasDocument, isFalse);
-    expect(cleared.documentPath, isNull);
-    expect(cleared.documentName, isNull);
-  });
+      final cleared = templateWithDoc.copyWith(clearDocument: true);
+      expect(cleared.hasDocument, isFalse);
+      expect(cleared.documentPath, isNull);
+      expect(cleared.documentName, isNull);
+    },
+  );
 
   test('WhatsAppSendPayload handles text and multiple documents correctly', () {
     const payload = WhatsAppSendPayload(
@@ -3727,90 +3851,88 @@ void main() {
   });
 
   testWidgets(
-      'WhatsApp Template picker allows multi-selecting and combining templates with documents',
-      (tester) async {
-    final student = Student(
-      name: 'Nimal Perera',
-      phone: '0771234567',
-    );
+    'WhatsApp Template picker allows multi-selecting and combining templates with documents',
+    (tester) async {
+      final student = Student(name: 'Nimal Perera', phone: '0771234567');
 
-    final templates = [
-      const WhatsAppTemplate(
-        id: 't1',
-        name: 'Greeting',
-        message: 'Hello {name}, welcome to our institute!',
-      ),
-      const WhatsAppTemplate(
-        id: 't2',
-        name: 'Curriculum PDF',
-        message: 'Here is the course syllabus.',
-        documentPath: '/mock/syllabus.pdf',
-        documentName: 'syllabus.pdf',
-      ),
-    ];
+      final templates = [
+        const WhatsAppTemplate(
+          id: 't1',
+          name: 'Greeting',
+          message: 'Hello {name}, welcome to our institute!',
+        ),
+        const WhatsAppTemplate(
+          id: 't2',
+          name: 'Curriculum PDF',
+          message: 'Here is the course syllabus.',
+          documentPath: '/mock/syllabus.pdf',
+          documentName: 'syllabus.pdf',
+        ),
+      ];
 
-    WhatsAppSendPayload? dispatchedResult;
+      WhatsAppSendPayload? dispatchedResult;
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder: (ctx) => ElevatedButton(
-              onPressed: () async {
-                dispatchedResult =
-                    await showModalBottomSheet<WhatsAppSendPayload>(
-                  context: ctx,
-                  isScrollControlled: true,
-                  builder: (_) => WhatsAppTemplatePickerSheet(
-                    student: student,
-                    templates: templates,
-                    onManageTemplates: () {},
-                  ),
-                );
-              },
-              child: const Text('Open Picker'),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (ctx) => ElevatedButton(
+                onPressed: () async {
+                  dispatchedResult =
+                      await showModalBottomSheet<WhatsAppSendPayload>(
+                        context: ctx,
+                        isScrollControlled: true,
+                        builder: (_) => WhatsAppTemplatePickerSheet(
+                          student: student,
+                          templates: templates,
+                          onManageTemplates: () {},
+                        ),
+                      );
+                },
+                child: const Text('Open Picker'),
+              ),
             ),
           ),
         ),
-      ),
-    );
+      );
 
-    // Open sheet
-    await tester.tap(find.text('Open Picker'));
-    await tester.pumpAndSettle();
+      // Open sheet
+      await tester.tap(find.text('Open Picker'));
+      await tester.pumpAndSettle();
 
-    expect(find.text('Select Template'), findsOneWidget);
-    expect(find.text('Greeting'), findsOneWidget);
-    expect(find.text('Curriculum PDF'), findsOneWidget);
-    expect(find.text('syllabus.pdf'), findsOneWidget);
+      expect(find.text('Select Template'), findsOneWidget);
+      expect(find.text('Greeting'), findsOneWidget);
+      expect(find.text('Curriculum PDF'), findsOneWidget);
+      expect(find.text('syllabus.pdf'), findsOneWidget);
 
-    // Switch to Multi-Select
-    await tester.tap(find.text('Multi-Select'));
-    await tester.pumpAndSettle();
+      // Switch to Multi-Select
+      await tester.tap(find.text('Multi-Select'));
+      await tester.pumpAndSettle();
 
-    expect(find.text('Done'), findsOneWidget);
+      expect(find.text('Done'), findsOneWidget);
 
-    // Select both templates
-    await tester.tap(find.text('Greeting'));
-    await tester.pumpAndSettle();
+      // Select both templates
+      await tester.tap(find.text('Greeting'));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Curriculum PDF'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Curriculum PDF'));
+      await tester.pumpAndSettle();
 
-    expect(find.text('2 selected'), findsOneWidget);
-    expect(find.text('Send 2 Templates (1 with docs)'), findsOneWidget);
+      expect(find.text('2 selected'), findsOneWidget);
+      expect(find.text('Send 2 Templates (1 with docs)'), findsOneWidget);
 
-    // Tap Send
-    await tester.tap(find.text('Send 2 Templates (1 with docs)'));
-    await tester.pumpAndSettle();
+      // Tap Send
+      await tester.tap(find.text('Send 2 Templates (1 with docs)'));
+      await tester.pumpAndSettle();
 
-    expect(dispatchedResult, isNotNull);
-    expect(
-      dispatchedResult!.message,
-      'Hello Nimal Perera, welcome to our institute!\n\nHere is the course syllabus.',
-    );
-    expect(dispatchedResult!.documentPaths, ['/mock/syllabus.pdf']);
-  });
+      expect(dispatchedResult, isNotNull);
+      expect(
+        dispatchedResult!.message,
+        'Hello Nimal Perera, welcome to our institute!\n\nHere is the course syllabus.',
+      );
+      expect(dispatchedResult!.documentPaths, ['/mock/syllabus.pdf']);
+    },
+  );
 
   test('WhatsAppTemplate allows document only without message text', () {
     const docOnlyTemplate = WhatsAppTemplate(
@@ -3832,126 +3954,185 @@ void main() {
   });
 
   testWidgets(
-      'WhatsApp Template picker sends template with document only when message is empty',
-      (tester) async {
-    final student = Student(
-      name: 'Kasun Dias',
-      phone: '0711111111',
-    );
+    'WhatsApp Template picker sends template with document only when message is empty',
+    (tester) async {
+      final student = Student(name: 'Kasun Dias', phone: '0711111111');
 
-    final templates = [
-      const WhatsAppTemplate(
-        id: 'doc_only',
-        name: 'Prospectus PDF',
-        message: '',
-        documentPath: '/mock/prospectus.pdf',
-        documentName: 'prospectus.pdf',
-      ),
-    ];
+      final templates = [
+        const WhatsAppTemplate(
+          id: 'doc_only',
+          name: 'Prospectus PDF',
+          message: '',
+          documentPath: '/mock/prospectus.pdf',
+          documentName: 'prospectus.pdf',
+        ),
+      ];
 
-    WhatsAppSendPayload? dispatchedResult;
+      WhatsAppSendPayload? dispatchedResult;
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder: (ctx) => ElevatedButton(
-              onPressed: () async {
-                dispatchedResult =
-                    await showModalBottomSheet<WhatsAppSendPayload>(
-                  context: ctx,
-                  isScrollControlled: true,
-                  builder: (_) => WhatsAppTemplatePickerSheet(
-                    student: student,
-                    templates: templates,
-                    onManageTemplates: () {},
-                  ),
-                );
-              },
-              child: const Text('Open Sheet'),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (ctx) => ElevatedButton(
+                onPressed: () async {
+                  dispatchedResult =
+                      await showModalBottomSheet<WhatsAppSendPayload>(
+                        context: ctx,
+                        isScrollControlled: true,
+                        builder: (_) => WhatsAppTemplatePickerSheet(
+                          student: student,
+                          templates: templates,
+                          onManageTemplates: () {},
+                        ),
+                      );
+                },
+                child: const Text('Open Sheet'),
+              ),
             ),
           ),
         ),
-      ),
-    );
+      );
 
-    await tester.tap(find.text('Open Sheet'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Open Sheet'));
+      await tester.pumpAndSettle();
 
-    expect(find.text('Prospectus PDF'), findsOneWidget);
-    expect(find.text('prospectus.pdf'), findsOneWidget);
+      expect(find.text('Prospectus PDF'), findsOneWidget);
+      expect(find.text('prospectus.pdf'), findsOneWidget);
 
-    // Tap single template
-    await tester.tap(find.text('Prospectus PDF'));
-    await tester.pumpAndSettle();
+      // Tap single template
+      await tester.tap(find.text('Prospectus PDF'));
+      await tester.pumpAndSettle();
 
-    expect(dispatchedResult, isNotNull);
-    expect(dispatchedResult!.message, isEmpty);
-    expect(dispatchedResult!.documentPaths, ['/mock/prospectus.pdf']);
-    expect(dispatchedResult!.hasDocuments, isTrue);
+      expect(dispatchedResult, isNotNull);
+      expect(dispatchedResult!.message, isEmpty);
+      expect(dispatchedResult!.documentPaths, ['/mock/prospectus.pdf']);
+      expect(dispatchedResult!.hasDocuments, isTrue);
+    },
+  );
+
+  testWidgets(
+    'BulkDispatchSheet processes students in queue with personalized text and skip support',
+    (tester) async {
+      final students = [
+        Student(name: 'Amal Silva', phone: '0712345678'),
+        Student(name: 'Bimal Fernando', phone: '0723456789'),
+      ];
+
+      const payload = WhatsAppSendPayload(
+        message: 'Hello {name}, your course starts soon!',
+        documentPaths: ['/mock/brochure.pdf'],
+      );
+
+      final dispatched = <({String studentName, String text})>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: BulkDispatchSheet(
+              students: students,
+              payload: payload,
+              isSms: false,
+              onDispatch: (student, text) async {
+                dispatched.add((studentName: student.name, text: text));
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Bulk WhatsApp Queue'), findsOneWidget);
+      expect(find.text('2 students in queue'), findsOneWidget);
+      expect(find.text('Amal Silva'), findsWidgets);
+      expect(
+        find.text('Hello Amal Silva, your course starts soon!'),
+        findsOneWidget,
+      );
+      expect(find.text('1 document(s) attached'), findsOneWidget);
+
+      // Send first student
+      await tester.tap(find.text('Send to Amal'));
+      await tester.pumpAndSettle();
+
+      expect(dispatched.length, 1);
+      expect(dispatched[0].studentName, 'Amal Silva');
+      expect(dispatched[0].text, 'Hello Amal Silva, your course starts soon!');
+
+      // Now on Bimal
+      expect(find.text('Bimal Fernando'), findsWidgets);
+      expect(
+        find.text('Hello Bimal Fernando, your course starts soon!'),
+        findsOneWidget,
+      );
+
+      // Skip second student
+      await tester.tap(find.text('Skip'));
+      await tester.pumpAndSettle();
+
+      // All done
+      expect(find.text('All Messages Dispatched!'), findsOneWidget);
+      expect(find.text('Done'), findsOneWidget);
+    },
+  );
+
+  test('formatCallDuration correctly formats various time intervals', () {
+    expect(formatCallDuration(225), '3 mins 45 secs');
+    expect(formatCallDuration(60), '1 min');
+    expect(formatCallDuration(65), '1 min 05 secs');
+    expect(formatCallDuration(120), '2 mins');
+    expect(formatCallDuration(121), '2 mins 01 sec');
+    expect(formatCallDuration(45), '45 secs');
+    expect(formatCallDuration(1), '1 sec');
+    expect(formatCallDuration(0), '0s');
+    expect(formatCallDuration(-5), '0s');
   });
 
   testWidgets(
-      'BulkDispatchSheet processes students in queue with personalized text and skip support',
-      (tester) async {
-    final students = [
-      Student(name: 'Amal Silva', phone: '0712345678'),
-      Student(name: 'Bimal Fernando', phone: '0723456789'),
-    ];
+    'Settings displays Auto-log Call Duration toggle and updates store',
+    (tester) async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(CallerIdService.channel, (call) async {
+        if (call.method == 'isCallerIdEnabled') return true;
+        if (call.method == 'canDrawOverlays') return true;
+        if (call.method == 'hasPhonePermissions') return true;
+        if (call.method == 'getCachedStudentCount') return 5;
+        if (call.method == 'isIgnoringBatteryOptimizations') return true;
+        return true;
+      });
 
-    const payload = WhatsAppSendPayload(
-      message: 'Hello {name}, your course starts soon!',
-      documentPaths: ['/mock/brochure.pdf'],
-    );
+      final settingsStore = MemoryAppSettingsStore()..pin = '2580';
+      await tester.pumpWidget(testApp(settingsStore: settingsStore));
+      await tester.pumpAndSettle();
+      await enterPin(tester, '2580');
+      await tester.pumpAndSettle();
 
-    final dispatched = <({String studentName, String text})>[];
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: BulkDispatchSheet(
-            students: students,
-            payload: payload,
-            isSms: false,
-            onDispatch: (student, text) async {
-              dispatched.add((studentName: student.name, text: text));
-            },
-          ),
+      final autoLogFinder = find.text('Auto-log Call Duration');
+      await tester.ensureVisible(autoLogFinder);
+      await tester.pumpAndSettle();
+
+      expect(autoLogFinder, findsOneWidget);
+      expect(
+        find.text(
+          'Record [Call Connected • 3 mins 45 secs] in lead history after each call',
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+        findsOneWidget,
+      );
 
-    expect(find.text('Bulk WhatsApp Queue'), findsOneWidget);
-    expect(find.text('2 students in queue'), findsOneWidget);
-    expect(find.text('Amal Silva'), findsWidgets);
-    expect(
-      find.text('Hello Amal Silva, your course starts soon!'),
-      findsOneWidget,
-    );
-    expect(find.text('1 document(s) attached'), findsOneWidget);
+      // Verify toggle action
+      await tester.tap(autoLogFinder);
+      await tester.pumpAndSettle();
+      expect(await settingsStore.readAutoLogCallDuration(), isFalse);
 
-    // Send first student
-    await tester.tap(find.text('Send to Amal'));
-    await tester.pumpAndSettle();
+      await tester.tap(autoLogFinder);
+      await tester.pumpAndSettle();
+      expect(await settingsStore.readAutoLogCallDuration(), isTrue);
 
-    expect(dispatched.length, 1);
-    expect(dispatched[0].studentName, 'Amal Silva');
-    expect(dispatched[0].text, 'Hello Amal Silva, your course starts soon!');
-
-    // Now on Bimal
-    expect(find.text('Bimal Fernando'), findsWidgets);
-    expect(
-      find.text('Hello Bimal Fernando, your course starts soon!'),
-      findsOneWidget,
-    );
-
-    // Skip second student
-    await tester.tap(find.text('Skip'));
-    await tester.pumpAndSettle();
-
-    // All done
-    expect(find.text('All Messages Dispatched!'), findsOneWidget);
-    expect(find.text('Done'), findsOneWidget);
-  });
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(CallerIdService.channel, null);
+    },
+  );
 }

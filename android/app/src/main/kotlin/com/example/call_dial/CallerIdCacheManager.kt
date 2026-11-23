@@ -3,6 +3,7 @@ package com.example.call_dial
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import org.json.JSONArray
 import org.json.JSONObject
 
 data class StudentCallerInfo(
@@ -190,5 +191,50 @@ object CallerIdCacheManager {
 
         Log.d(TAG, "lookupStudent: No match found for $rawPhone (norm: $norm, digits: $digits)")
         return null
+    }
+
+    private const val PREFS_PENDING_CALLS = "leadpilot_pending_call_logs"
+    private const val KEY_PENDING_LIST = "pending_calls"
+
+    fun addPendingCallLog(context: Context, phone: String, durationSec: Long, callType: String) {
+        try {
+            val prefs = context.getSharedPreferences(PREFS_PENDING_CALLS, Context.MODE_PRIVATE)
+            val existing = getPendingCallLogs(context).toMutableList()
+            val obj = JSONObject().apply {
+                put("phone", phone)
+                put("duration", durationSec)
+                put("type", callType)
+                put("timestamp", System.currentTimeMillis())
+            }
+            existing.add(obj)
+            val arr = JSONArray()
+            for (item in existing) {
+                arr.put(item)
+            }
+            prefs.edit().putString(KEY_PENDING_LIST, arr.toString()).apply()
+            Log.d(TAG, "addPendingCallLog: Saved call log for $phone (duration=${durationSec}s, type=$callType)")
+        } catch (e: Exception) {
+            Log.e(TAG, "addPendingCallLog error", e)
+        }
+    }
+
+    fun getPendingCallLogs(context: Context): List<JSONObject> {
+        val prefs = context.getSharedPreferences(PREFS_PENDING_CALLS, Context.MODE_PRIVATE)
+        val str = prefs.getString(KEY_PENDING_LIST, null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(str)
+            val list = mutableListOf<JSONObject>()
+            for (i in 0 until arr.length()) {
+                list.add(arr.getJSONObject(i))
+            }
+            list
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun clearPendingCallLogs(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_PENDING_CALLS, Context.MODE_PRIVATE)
+        prefs.edit().clear().apply()
     }
 }
