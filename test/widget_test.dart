@@ -2322,7 +2322,7 @@ void main() {
       expect(find.text('Caller ID'), findsOneWidget);
       expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
       expect(testPopupFinder, findsOneWidget);
-      expect(find.text('LeadPilot v1.23.2'), findsOneWidget);
+      expect(find.text('LeadPilot v1.24.0'), findsOneWidget);
 
       await tester.tap(testPopupFinder);
       await tester.pumpAndSettle();
@@ -3660,7 +3660,7 @@ void main() {
       await tester.tap(checkBtn);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
-      expect(find.text('LeadPilot is up to date (v1.23.2).'), findsOneWidget);
+      expect(find.text('LeadPilot is up to date (v1.24.0).'), findsOneWidget);
 
       // Toggle Auto-check
       final switchFinder = find.byKey(const Key('auto_check_updates_switch'));

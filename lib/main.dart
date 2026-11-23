@@ -22,7 +22,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.23.2';
+const String kAppVersion = '1.24.0';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -6862,6 +6862,37 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           label: 'Today Follow-up',
                           filter: _LeadFilter.todayFollowUp,
                         ),
+                        if (_hasActiveFilters) ...[
+                          const SizedBox(width: 8),
+                          InputChip(
+                            avatar: const Icon(
+                              Icons.filter_alt_rounded,
+                              size: 16,
+                              color: Colors.white,
+                            ),
+                            label: Text(
+                              _statusFilter ?? 'Date Filter',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                            backgroundColor: _navy,
+                            deleteIcon: const Icon(
+                              Icons.close_rounded,
+                              size: 16,
+                              color: Colors.white,
+                            ),
+                            onDeleted: () {
+                              setState(() {
+                                _statusFilter = null;
+                                _dateFrom = null;
+                                _dateTo = null;
+                              });
+                            },
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -11272,6 +11303,79 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
               ),
               const SizedBox(height: 16),
               Text(
+                'Calling & SIM',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Card(
+                color: theme.colorScheme.surfaceContainerLow,
+                child: Column(
+                  children: [
+                    SwitchListTile(
+                      secondary: const Icon(Icons.phone_forwarded_rounded),
+                      title: const Text('Direct In-App Calling'),
+                      subtitle: const Text(
+                        'Call directly without opening dialpad • Keep LeadPilot in front',
+                      ),
+                      value: _directCalling,
+                      onChanged: (val) async {
+                        setState(() => _directCalling = val);
+                        await widget.settingsStore?.saveDirectCalling(val);
+                      },
+                    ),
+                    if (_detectedSimSlots.isNotEmpty) ...[
+                      Divider(
+                        height: 1,
+                        indent: 56,
+                        color: theme.colorScheme.outlineVariant,
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.sim_card_outlined),
+                        title: const Text('Default Calling SIM'),
+                        subtitle: Text(_getSimSlotSubtitle()),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: _showDefaultSimDialog,
+                      ),
+                    ],
+                    if (_detectedCallingApps.length > 1) ...[
+                      Divider(
+                        height: 1,
+                        indent: 56,
+                        color: theme.colorScheme.outlineVariant,
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.phone_android_rounded),
+                        title: const Text('Default Calling App (Phone / 3CX)'),
+                        subtitle: Text(_getCallingAppSubtitle()),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: _showCallingAppDialog,
+                      ),
+                    ],
+                    Divider(
+                      height: 1,
+                      indent: 56,
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                    SwitchListTile(
+                      secondary: const Icon(Icons.chat_bubble_outline_rounded),
+                      title: const Text('Floating Call Head (1-Tap End Call)'),
+                      subtitle: const Text(
+                        'Show floating card with student name & 1-tap End Call button',
+                      ),
+                      value: _floatingCallHead,
+                      onChanged: (val) async {
+                        setState(() => _floatingCallHead = val);
+                        await widget.settingsStore?.saveFloatingCallHead(val);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
                 'Caller ID',
                 style: theme.textTheme.titleSmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
@@ -11410,91 +11514,6 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
                           await CallerIdService.openAppDetailsSettings();
                         },
                       ),
-                      Divider(
-                        height: 1,
-                        indent: 56,
-                        color: theme.colorScheme.outlineVariant,
-                      ),
-                      SwitchListTile(
-                        secondary: const Icon(Icons.phone_forwarded_rounded),
-                        title: const Text('Direct In-App Calling'),
-                        subtitle: const Text(
-                          'Call directly without opening dialpad • Keep LeadPilot in front',
-                        ),
-                        value: _directCalling,
-                        onChanged: (val) async {
-                          setState(() => _directCalling = val);
-                          await widget.settingsStore?.saveDirectCalling(val);
-                        },
-                      ),
-                      if (_detectedSimSlots.isNotEmpty) ...[
-                        Divider(
-                          height: 1,
-                          indent: 56,
-                          color: theme.colorScheme.outlineVariant,
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.sim_card_outlined),
-                          title: const Text('Default Calling SIM'),
-                          subtitle: Text(_getSimSlotSubtitle()),
-                          trailing: const Icon(Icons.chevron_right_rounded),
-                          onTap: _showDefaultSimDialog,
-                        ),
-                      ],
-                      if (_detectedCallingApps.length > 1) ...[
-                        Divider(
-                          height: 1,
-                          indent: 56,
-                          color: theme.colorScheme.outlineVariant,
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.phone_android_rounded),
-                          title: const Text('Default Calling App (Phone / 3CX)'),
-                          subtitle: Text(_getCallingAppSubtitle()),
-                          trailing: const Icon(Icons.chevron_right_rounded),
-                          onTap: _showCallingAppDialog,
-                        ),
-                      ],
-                      Divider(
-                        height: 1,
-                        indent: 56,
-                        color: theme.colorScheme.outlineVariant,
-                      ),
-                      SwitchListTile(
-                        secondary:
-                            const Icon(Icons.chat_bubble_outline_rounded),
-                        title:
-                            const Text('Floating Call Head (1-Tap End Call)'),
-                        subtitle: const Text(
-                          'Show floating card with student name & 1-tap End Call button',
-                        ),
-                        value: _floatingCallHead,
-                        onChanged: (val) async {
-                          setState(() => _floatingCallHead = val);
-                          await widget.settingsStore
-                              ?.saveFloatingCallHead(val);
-                        },
-                      ),
-                      if (_floatingCallHead) ...[
-                        Divider(
-                          height: 1,
-                          indent: 56,
-                          color: theme.colorScheme.outlineVariant,
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.preview_rounded),
-                          title: const Text('Preview Floating Call Head'),
-                          subtitle: const Text(
-                            'Display sample chat-head with live timer & End Call button',
-                          ),
-                          onTap: () async {
-                            await CallerIdService.showFloatingCallHead(
-                              name: 'Kamal Perera',
-                              phone: '077 123 4567',
-                            );
-                          },
-                        ),
-                      ],
                       Divider(
                         height: 1,
                         indent: 56,
