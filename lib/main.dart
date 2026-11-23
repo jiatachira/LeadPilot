@@ -22,7 +22,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.22.0';
+const String kAppVersion = '1.22.1';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -7040,6 +7040,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         student: students.first,
         templates: templates,
         isSms: false,
+        isBulk: true,
         onManageTemplates: () async {
           Navigator.pop(context);
           await _openWhatsAppTemplatesSettings();
@@ -7082,6 +7083,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         student: students.first,
         templates: templates,
         isSms: true,
+        isBulk: true,
         onManageTemplates: () async {
           Navigator.pop(context);
           await _openWhatsAppTemplatesSettings();
@@ -11410,12 +11412,14 @@ class WhatsAppTemplatePickerSheet extends StatefulWidget {
     required this.templates,
     required this.onManageTemplates,
     this.isSms = false,
+    this.isBulk = false,
   });
 
   final Student student;
   final List<WhatsAppTemplate> templates;
   final VoidCallback onManageTemplates;
   final bool isSms;
+  final bool isBulk;
 
   @override
   State<WhatsAppTemplatePickerSheet> createState() =>
@@ -11436,7 +11440,8 @@ class _WhatsAppTemplatePickerSheetState
   }
 
   void _sendSingle(WhatsAppTemplate item) {
-    final preview = _formatMessage(item.message);
+    final messageToSend =
+        widget.isBulk ? item.message : _formatMessage(item.message);
     final docs =
         (item.hasDocument && !widget.isSms && item.documentPath != null)
             ? [item.documentPath!]
@@ -11444,7 +11449,7 @@ class _WhatsAppTemplatePickerSheetState
     Navigator.pop(
       context,
       WhatsAppSendPayload(
-        message: preview,
+        message: messageToSend,
         documentPaths: docs,
       ),
     );
@@ -11459,7 +11464,8 @@ class _WhatsAppTemplatePickerSheetState
     if (selected.isEmpty) return;
 
     final combinedMessage = selected
-        .map((t) => _formatMessage(t.message).trim())
+        .map((t) =>
+            (widget.isBulk ? t.message : _formatMessage(t.message)).trim())
         .where((msg) => msg.isNotEmpty)
         .join('\n\n');
 
@@ -11858,8 +11864,31 @@ class BulkDispatchSheet extends StatefulWidget {
 class _BulkDispatchSheetState extends State<BulkDispatchSheet> {
   int _currentIndex = 0;
   final Map<int, _BulkItemStatus> _statuses = {};
+  final Map<int, String> _customEdits = {};
+  late final TextEditingController _messageController;
   bool _isDone = false;
   bool _isDispatching = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _messageController = TextEditingController();
+    _syncControllerForCurrentStudent();
+  }
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    super.dispose();
+  }
+
+  void _syncControllerForCurrentStudent() {
+    if (_currentIndex < widget.students.length) {
+      final student = widget.students[_currentIndex];
+      _messageController.text =
+          _customEdits[_currentIndex] ?? _formatForStudent(student);
+    }
+  }
 
   int get _sentCount =>
       _statuses.values.where((s) => s == _BulkItemStatus.sent).length;
@@ -11876,10 +11905,21 @@ class _BulkDispatchSheetState extends State<BulkDispatchSheet> {
 
   String _formatForStudent(Student student) {
     final sName = student.name.trim();
-    return widget.payload.message.replaceAll(
-      '{name}',
-      sName.isNotEmpty ? sName : 'there',
+    final nameToUse = sName.isNotEmpty ? sName : 'there';
+    var text = widget.payload.message;
+    text = text.replaceAll(
+      RegExp(r'\{\s*name\s*\}', caseSensitive: false),
+      nameToUse,
     );
+    text = text.replaceAll(
+      RegExp(r'\{\s*student\s*\}', caseSensitive: false),
+      nameToUse,
+    );
+    text = text.replaceAll(
+      RegExp(r'\{\s*student_name\s*\}', caseSensitive: false),
+      nameToUse,
+    );
+    return text;
   }
 
   void _advanceToNext() {
@@ -11892,6 +11932,7 @@ class _BulkDispatchSheetState extends State<BulkDispatchSheet> {
     }
     if (next != -1) {
       _currentIndex = next;
+      _syncControllerForCurrentStudent();
     } else {
       _isDone = true;
     }
@@ -11902,7 +11943,7 @@ class _BulkDispatchSheetState extends State<BulkDispatchSheet> {
     setState(() => _isDispatching = true);
 
     final student = widget.students[_currentIndex];
-    final personalizedText = _formatForStudent(student);
+    final personalizedText = _messageController.text.trim();
 
     try {
       await widget.onDispatch(student, personalizedText);
@@ -12211,7 +12252,6 @@ class _BulkDispatchSheetState extends State<BulkDispatchSheet> {
 
   Widget _buildCurrentStudentCard(BuildContext context, ThemeData theme) {
     final currentStudent = widget.students[_currentIndex];
-    final personalizedText = _formatForStudent(currentStudent);
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -12297,28 +12337,39 @@ class _BulkDispatchSheetState extends State<BulkDispatchSheet> {
             ),
           ],
           const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+          TextField(
+            controller: _messageController,
+            maxLines: 4,
+            onChanged: (val) {
+              _customEdits[_currentIndex] = val;
+            },
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: '(Document attachment only)',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(
+                  color:
+                      theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+                ),
               ),
-            ),
-            child: Text(
-              personalizedText.isNotEmpty
-                  ? personalizedText
-                  : '(Document attachment only)',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: personalizedText.isNotEmpty
-                    ? theme.colorScheme.onSurface
-                    : theme.colorScheme.outline,
-                fontStyle: personalizedText.isEmpty ? FontStyle.italic : null,
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(
+                  color:
+                      theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+                ),
               ),
-              maxLines: 4,
-              overflow: TextOverflow.ellipsis,
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(
+                  color: theme.colorScheme.primary,
+                  width: 1.5,
+                ),
+              ),
+              contentPadding: const EdgeInsets.all(10),
             ),
+            style: theme.textTheme.bodyMedium,
           ),
           const SizedBox(height: 12),
           Row(

@@ -2322,7 +2322,7 @@ void main() {
       expect(find.text('Caller ID'), findsOneWidget);
       expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
       expect(testPopupFinder, findsOneWidget);
-      expect(find.text('LeadPilot v1.22.0'), findsOneWidget);
+      expect(find.text('LeadPilot v1.22.1'), findsOneWidget);
 
       await tester.tap(testPopupFinder);
       await tester.pumpAndSettle();
@@ -3660,7 +3660,7 @@ void main() {
       await tester.tap(checkBtn);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
-      expect(find.text('LeadPilot is up to date (v1.22.0).'), findsOneWidget);
+      expect(find.text('LeadPilot is up to date (v1.22.1).'), findsOneWidget);
 
       // Toggle Auto-check
       final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
@@ -4133,6 +4133,54 @@ void main() {
 
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(CallerIdService.channel, null);
+    },
+  );
+
+  testWidgets(
+    'WhatsAppTemplatePickerSheet with isBulk: true preserves {name} placeholder for bulk dispatch',
+    (tester) async {
+      final student = Student(name: 'First Student', phone: '0711111111');
+      final templates = [
+        const WhatsAppTemplate(
+          id: 'test_t1',
+          name: 'Welcome Template',
+          message: 'Hello {name}, welcome to class!',
+        ),
+      ];
+
+      WhatsAppSendPayload? payload;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (ctx) => ElevatedButton(
+                onPressed: () async {
+                  payload = await showModalBottomSheet<WhatsAppSendPayload>(
+                    context: ctx,
+                    builder: (_) => WhatsAppTemplatePickerSheet(
+                      student: student,
+                      templates: templates,
+                      onManageTemplates: () {},
+                      isBulk: true,
+                    ),
+                  );
+                },
+                child: const Text('Open Picker'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open Picker'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Welcome Template'));
+      await tester.pumpAndSettle();
+
+      expect(payload, isNotNull);
+      // Confirms {name} was preserved and NOT burnt with 'First Student'
+      expect(payload!.message, 'Hello {name}, welcome to class!');
     },
   );
 }
