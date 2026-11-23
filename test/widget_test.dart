@@ -2308,11 +2308,24 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.20.0'), findsOneWidget);
+    expect(find.text('LeadPilot v1.21.0'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
     expect(find.text('Sample Caller ID popup displayed!'), findsOneWidget);
+
+    final bannerFinder = find.text('Test Lock Screen & Heads-Up Banner');
+    await tester.ensureVisible(bannerFinder);
+    await tester.pumpAndSettle();
+    expect(bannerFinder, findsOneWidget);
+    await tester.tap(bannerFinder);
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'Sample Heads-Up / Lock Screen banner displayed! Check your notifications.',
+      ),
+      findsOneWidget,
+    );
 
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(CallerIdService.channel, null);
@@ -3534,7 +3547,7 @@ void main() {
     await tester.tap(checkBtn);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
-    expect(find.text('LeadPilot is up to date (v1.20.0).'), findsOneWidget);
+    expect(find.text('LeadPilot is up to date (v1.21.0).'), findsOneWidget);
 
     // Toggle Auto-check
     final switchFinder = find.byKey(const Key('auto_check_updates_switch'));

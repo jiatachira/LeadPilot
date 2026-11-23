@@ -13,7 +13,7 @@ import androidx.core.app.NotificationCompat
 
 object CallerIdNotificationHelper {
     private const val TAG = "CallerIdNotification"
-    private const val CHANNEL_ID = "leadpilot_caller_id_channel_v2"
+    private const val CHANNEL_ID = "leadpilot_caller_id_channel_v3"
     private const val NOTIFICATION_ID = 8844
 
     private fun ensureChannel(context: Context) {

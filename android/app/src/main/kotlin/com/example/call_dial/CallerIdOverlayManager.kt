@@ -111,12 +111,18 @@ object CallerIdOverlayManager {
                 val density = context.resources.displayMetrics.density
                 val initialY = (100 * density).toInt()
 
+                var windowFlags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+
+                @Suppress("DEPRECATION")
+                windowFlags = windowFlags or WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+
                 val params = WindowManager.LayoutParams(
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.WRAP_CONTENT,
                     layoutFlag,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                    windowFlags,
                     PixelFormat.TRANSLUCENT
                 )
                 params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
@@ -205,7 +211,11 @@ object CallerIdOverlayManager {
     private fun dismissInternal(windowManager: WindowManager) {
         overlayView?.let { view ->
             try {
-                windowManager.removeView(view)
+                if (view.isAttachedToWindow) {
+                    windowManager.removeView(view)
+                } else {
+                    windowManager.removeViewImmediate(view)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error removing overlay view", e)
             }

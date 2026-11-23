@@ -159,6 +159,69 @@ class MainActivity : FlutterFragmentActivity() {
                         CallerIdOverlayManager.dismiss(applicationContext)
                         result.success(true)
                     }
+                    "testNotificationBanner" -> {
+                        try {
+                            val sampleInfo = StudentCallerInfo(
+                                name = "Kamal Perera",
+                                phone = "077 123 4567",
+                                status = "Interested",
+                                location = "Colombo",
+                                examType = "2026 A/L",
+                                examYear = "",
+                                lastComment = "Asked to call back tomorrow afternoon after 4 PM.",
+                                streakCount = 3
+                            )
+                            CallerIdNotificationHelper.show(applicationContext, sampleInfo)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("TEST_NOTIFICATION_ERROR", e.message, null)
+                        }
+                    }
+                    "isIgnoringBatteryOptimizations" -> {
+                        val powerManager = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+                        val isIgnoring = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            powerManager?.isIgnoringBatteryOptimizations(packageName) ?: true
+                        } else {
+                            true
+                        }
+                        result.success(isIgnoring)
+                    }
+                    "requestIgnoreBatteryOptimizations" -> {
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                    data = Uri.parse("package:$packageName")
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(intent)
+                                result.success(true)
+                            } else {
+                                result.success(true)
+                            }
+                        } catch (e: Exception) {
+                            try {
+                                val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(fallback)
+                                result.success(true)
+                            } catch (e2: Exception) {
+                                result.error("BATTERY_ERROR", e2.message, null)
+                            }
+                        }
+                    }
+                    "openAppDetailsSettings" -> {
+                        try {
+                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.parse("package:$packageName")
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("SETTINGS_ERROR", e.message, null)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }

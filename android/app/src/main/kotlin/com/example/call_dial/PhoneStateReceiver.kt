@@ -55,38 +55,17 @@ class PhoneStateReceiver : BroadcastReceiver() {
 
                     val student = CallerIdCacheManager.lookupStudent(appContext, incomingNumber)
                     if (student != null) {
-                        Log.d(TAG, "Matched student: ${student.name} (${student.phone}). Checking lock state to show single popup.")
+                        Log.d(TAG, "Matched student: ${student.name} (${student.phone}). Showing Caller ID alerts.")
                         lastShownNumber = incomingNumber
 
-                        val keyguardManager = appContext.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-                        val powerManager = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
-                        val isScreenOn = powerManager?.isInteractive ?: true
-                        val isLocked = (keyguardManager?.isKeyguardLocked == true) || !isScreenOn
+                        // 1. ALWAYS post High-Priority Heads-Up & Lock Screen Notification Banner
+                        CallerIdNotificationHelper.show(appContext, student)
 
-                        if (isLocked) {
-                            Log.d(TAG, "Device is locked/screen-off (isLocked=$isLocked). Launching single lock screen Caller ID.")
-                            // Ensure WindowManager overlay is NOT displayed
-                            CallerIdOverlayManager.dismiss(appContext)
-
-                            // 1. Post Full-Screen Intent Notification (wakes up screen, launches CallerIdActivity via fullScreenIntent)
-                            CallerIdNotificationHelper.show(appContext, student)
-
-                            // 2. Also attempt direct transparent Activity start
-                            CallerIdActivity.start(appContext, student)
+                        // 2. ALWAYS display Floating Window Overlay if permission is granted
+                        if (Settings.canDrawOverlays(appContext)) {
+                            CallerIdOverlayManager.show(appContext, student)
                         } else {
-                            Log.d(TAG, "Device is unlocked (isLocked=$isLocked). Displaying single floating overlay.")
-                            // Dismiss lock screen activity
-                            CallerIdActivity.dismissCurrent()
-
-                            // Check overlay permission
-                            if (Settings.canDrawOverlays(appContext)) {
-                                // Cancel notification banner so only the floating overlay is visible
-                                CallerIdNotificationHelper.cancel(appContext)
-                                CallerIdOverlayManager.show(appContext, student)
-                            } else {
-                                // Fallback to notification banner if overlay permission not granted
-                                CallerIdNotificationHelper.show(appContext, student)
-                            }
+                            Log.w(TAG, "SYSTEM_ALERT_WINDOW permission not granted; notification banner displayed as fallback.")
                         }
                     } else {
                         Log.d(TAG, "No student lead matched for number: $incomingNumber")

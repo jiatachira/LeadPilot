@@ -22,7 +22,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.20.0';
+const String kAppVersion = '1.21.0';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -1186,6 +1186,42 @@ class CallerIdService {
   static Future<void> testCallerIdPopup() async {
     try {
       await channel.invokeMethod('testCallerIdPopup');
+    } on MissingPluginException {
+      // In tests
+    } catch (_) {}
+  }
+
+  static Future<void> testNotificationBanner() async {
+    try {
+      await channel.invokeMethod('testNotificationBanner');
+    } on MissingPluginException {
+      // In tests
+    } catch (_) {}
+  }
+
+  static Future<bool> isIgnoringBatteryOptimizations() async {
+    try {
+      final res =
+          await channel.invokeMethod<bool>('isIgnoringBatteryOptimizations');
+      return res ?? true;
+    } on MissingPluginException {
+      return true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<void> requestIgnoreBatteryOptimizations() async {
+    try {
+      await channel.invokeMethod('requestIgnoreBatteryOptimizations');
+    } on MissingPluginException {
+      // In tests
+    } catch (_) {}
+  }
+
+  static Future<void> openAppDetailsSettings() async {
+    try {
+      await channel.invokeMethod('openAppDetailsSettings');
     } on MissingPluginException {
       // In tests
     } catch (_) {}
@@ -9929,6 +9965,7 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
   bool _callerIdEnabled = true;
   bool _hasOverlayPermission = false;
   bool _hasPhonePermissions = false;
+  bool _isIgnoringBattery = true;
   int _cachedCount = 0;
   String _geminiApiKey = '';
   bool _autoCheckUpdates = true;
@@ -9991,6 +10028,8 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
     final enabled = await CallerIdService.isEnabled();
     final hasOverlay = await CallerIdService.canDrawOverlays();
     final hasPhone = await CallerIdService.hasPhonePermissions();
+    final isIgnoringBattery =
+        await CallerIdService.isIgnoringBatteryOptimizations();
     var count = await CallerIdService.getCachedCount();
     if (count == 0 && widget.students.isNotEmpty) {
       await CallerIdService.syncStudents(widget.students);
@@ -10001,6 +10040,7 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
         _callerIdEnabled = enabled;
         _hasOverlayPermission = hasOverlay;
         _hasPhonePermissions = hasPhone;
+        _isIgnoringBattery = isIgnoringBattery;
         _cachedCount = count > 0 ? count : widget.students.length;
       });
     }
@@ -10072,9 +10112,30 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
     }
     await CallerIdService.testCallerIdPopup();
     if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Sample Caller ID popup displayed!'),
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Future<void> _testNotificationBanner() async {
+    final hasPhone = await CallerIdService.hasPhonePermissions();
+    if (!mounted) return;
+    if (!hasPhone) {
+      await _requestPermissions();
+      return;
+    }
+    await CallerIdService.testNotificationBanner();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Sample Heads-Up / Lock Screen banner displayed! Check your notifications.',
+        ),
         duration: Duration(seconds: 3),
       ),
     );
@@ -10414,18 +10475,85 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
                         color: theme.colorScheme.outlineVariant,
                       ),
                       ListTile(
+                        leading: const Icon(Icons.notification_important_rounded),
+                        title: const Text('Test Lock Screen & Heads-Up Banner'),
+                        subtitle: const Text(
+                          'Display a sample calling alert banner',
+                        ),
+                        onTap: _testNotificationBanner,
+                      ),
+                      if (!_isIgnoringBattery) ...[
+                        Divider(
+                          height: 1,
+                          indent: 56,
+                          color: theme.colorScheme.outlineVariant,
+                        ),
+                        ListTile(
+                          leading: const Icon(
+                            Icons.battery_alert_rounded,
+                            color: Color(0xFFFFAA48),
+                          ),
+                          title: const Text('Allow Background Running'),
+                          subtitle: const Text(
+                            'Exempt from Battery Optimization so detection runs when phone is asleep',
+                          ),
+                          trailing: FilledButton.tonal(
+                            onPressed: () async {
+                              await CallerIdService
+                                  .requestIgnoreBatteryOptimizations();
+                              await Future<void>.delayed(
+                                const Duration(seconds: 1),
+                              );
+                              await _loadCallerIdState();
+                            },
+                            child: const Text('Allow'),
+                          ),
+                        ),
+                      ],
+                      Divider(
+                        height: 1,
+                        indent: 56,
+                        color: theme.colorScheme.outlineVariant,
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.app_settings_alt_rounded),
+                        title: const Text('Xiaomi / Samsung Background Fix'),
+                        subtitle: const Text(
+                          'Open App Settings to allow Autostart & Pop-ups in background',
+                        ),
+                        trailing: Icon(
+                          Icons.open_in_new_rounded,
+                          size: 18,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        onTap: () async {
+                          await CallerIdService.openAppDetailsSettings();
+                        },
+                      ),
+                      Divider(
+                        height: 1,
+                        indent: 56,
+                        color: theme.colorScheme.outlineVariant,
+                      ),
+                      ListTile(
                         leading: const Icon(Icons.sync_rounded),
                         title: const Text('Re-sync Leads to Phone'),
-                        subtitle: Text('$_cachedCount student lead(s) stored in phone'),
+                        subtitle: Text(
+                          '$_cachedCount student lead(s) stored in phone',
+                        ),
                         trailing: TextButton(
                           onPressed: () async {
                             if (widget.students.isNotEmpty) {
-                              await CallerIdService.syncStudents(widget.students);
+                              await CallerIdService.syncStudents(
+                                widget.students,
+                              );
                               await _loadCallerIdState();
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    content: Text('${widget.students.length} leads synced for Caller ID!'),
+                                    content: Text(
+                                      '${widget.students.length} leads synced for Caller ID!',
+                                    ),
                                     duration: const Duration(seconds: 2),
                                   ),
                                 );
