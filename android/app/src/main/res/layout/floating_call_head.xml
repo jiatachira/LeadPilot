@@ -7,9 +7,9 @@
     android:gravity="center_vertical"
     android:background="@drawable/floating_call_head_bg"
     android:paddingStart="14dp"
-    android:paddingTop="8dp"
-    android:paddingEnd="8dp"
-    android:paddingBottom="8dp"
+    android:paddingTop="7dp"
+    android:paddingEnd="7dp"
+    android:paddingBottom="7dp"
     android:elevation="8dp">
 
     <!-- Active Call Dot -->
@@ -19,36 +19,20 @@
         android:layout_height="10dp"
         android:background="@drawable/call_head_pulse_dot" />
 
-    <!-- Info Column (Student Name + Duration) -->
-    <LinearLayout
+    <!-- Student Name -->
+    <TextView
+        android:id="@+id/call_head_name"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
         android:layout_marginStart="10dp"
-        android:layout_marginEnd="14dp">
-
-        <TextView
-            android:id="@+id/call_head_name"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:maxWidth="130dp"
-            android:ellipsize="end"
-            android:singleLine="true"
-            android:text="Student"
-            android:textColor="#FFFFFF"
-            android:textSize="13sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/call_head_timer"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="00:00"
-            android:textColor="#62D6B0"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:fontFamily="monospace" />
-    </LinearLayout>
+        android:layout_marginEnd="12dp"
+        android:maxWidth="140dp"
+        android:ellipsize="end"
+        android:singleLine="true"
+        android:text="Student Call"
+        android:textColor="#FFFFFF"
+        android:textSize="13sp"
+        android:textStyle="bold" />
 
     <!-- End Call Button (Red Circle) -->
     <ImageButton

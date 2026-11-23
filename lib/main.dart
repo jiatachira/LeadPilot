@@ -22,7 +22,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.23.0';
+const String kAppVersion = '1.23.1';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -5564,9 +5564,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Student? _pendingCallStudent;
   DateTime? _callStartedAt;
   Student? _activeInAppCallStudent;
-  DateTime? _activeInAppCallStartedAt;
-  Timer? _activeInAppCallTimer;
-  int _activeInAppCallDurationSec = 0;
   Offset _activeCallPillPosition = const Offset(16, 70);
 
   @override
@@ -5641,7 +5638,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _activeInAppCallTimer?.cancel();
     _offlineQueueRetryTimer?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -6979,31 +6975,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                       const SizedBox(width: 10),
                       ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 130),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _activeInAppCallStudent!.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            Text(
-                              formatCallTimer(_activeInAppCallDurationSec),
-                              style: const TextStyle(
-                                color: Color(0xFF62D6B0),
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                          ],
+                        constraints: const BoxConstraints(maxWidth: 140),
+                        child: Text(
+                          _activeInAppCallStudent!.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -7109,38 +7090,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _startActiveCallTimer() {
-    _activeInAppCallTimer?.cancel();
-    _activeInAppCallDurationSec = 0;
-    _activeInAppCallTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted || _activeInAppCallStartedAt == null) {
-        timer.cancel();
-        return;
-      }
-      setState(() {
-        _activeInAppCallDurationSec =
-            DateTime.now().difference(_activeInAppCallStartedAt!).inSeconds;
-      });
-    });
-  }
-
-  void _stopActiveCallTimer() {
-    _activeInAppCallTimer?.cancel();
-    _activeInAppCallTimer = null;
-  }
-
   Future<void> _endActiveCall() async {
-    final student = _activeInAppCallStudent ?? _pendingCallStudent;
-    final duration = _activeInAppCallDurationSec > 0
-        ? _activeInAppCallDurationSec
-        : (_activeInAppCallStartedAt != null
-            ? DateTime.now().difference(_activeInAppCallStartedAt!).inSeconds
-            : 0);
-
-    _stopActiveCallTimer();
     setState(() {
       _activeInAppCallStudent = null;
-      _activeInAppCallStartedAt = null;
       _pendingCallStudent = null;
       _callStartedAt = null;
     });
@@ -7151,10 +7103,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       await CallerIdService.dismissFloatingCallHead();
     } catch (_) {}
-
-    if (student != null) {
-      await _logCallDurationForStudent(student, duration);
-    }
   }
 
   Future<int?> _showSimChoiceSheet(
@@ -7295,9 +7243,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
           setState(() {
             _activeInAppCallStudent = student;
-            _activeInAppCallStartedAt = DateTime.now();
           });
-          _startActiveCallTimer();
 
           final success = await CallerIdService.directCall(
             phone: student.phone,
@@ -7328,204 +7274,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _checkAndLogCallDuration() async {
-    // 0. Check active in-app call
     if (_activeInAppCallStudent != null) {
-      _stopActiveCallTimer();
-      final student = _activeInAppCallStudent!;
-      final startedAt = _callStartedAt;
       setState(() {
         _activeInAppCallStudent = null;
-        _activeInAppCallStartedAt = null;
         _pendingCallStudent = null;
         _callStartedAt = null;
       });
-
-      final elapsedSec = startedAt != null
-          ? DateTime.now().difference(startedAt).inSeconds
-          : _activeInAppCallDurationSec;
-      if (elapsedSec >= 2) {
-        await Future<void>.delayed(const Duration(milliseconds: 1000));
-        if (!mounted) return;
-        int durationSec = elapsedSec;
-        try {
-          final log =
-              await CallerIdService.getLatestCallLog(phone: student.phone);
-          if (log != null && log['duration'] is num) {
-            durationSec = (log['duration'] as num).toInt();
-          }
-        } catch (_) {}
-        await _logCallDurationForStudent(student, durationSec);
-      }
       return;
     }
 
-    // 1. Check if an in-app call was placed to a student
     if (_pendingCallStudent != null && _callStartedAt != null) {
-      final student = _pendingCallStudent!;
-      final startedAt = _callStartedAt!;
       _pendingCallStudent = null;
       _callStartedAt = null;
-
-      final elapsedSec = DateTime.now().difference(startedAt).inSeconds;
-      if (elapsedSec >= 2) {
-        // Wait 1s for Android telecom CallLog to flush
-        await Future<void>.delayed(const Duration(milliseconds: 1000));
-        if (!mounted) return;
-
-        int durationSec = elapsedSec;
-        try {
-          final log =
-              await CallerIdService.getLatestCallLog(phone: student.phone);
-          if (log != null && log['duration'] is num) {
-            durationSec = (log['duration'] as num).toInt();
-          }
-        } catch (_) {}
-
-        await _logCallDurationForStudent(student, durationSec);
-      }
-    }
-
-    // 2. Also check any pending incoming/background calls captured by PhoneStateReceiver
-    try {
-      final pendingLogs = await CallerIdService.getPendingCallLogs();
-      for (final log in pendingLogs) {
-        final phone = log['phone']?.toString();
-        final duration = (log['duration'] as num?)?.toInt() ?? 0;
-        if (phone != null && phone.isNotEmpty) {
-          final matchingStudent = _students
-              .where((s) =>
-                  normalizeContactPhone(s.phone) ==
-                  normalizeContactPhone(phone))
-              .firstOrNull;
-          if (matchingStudent != null) {
-            await _logCallDurationForStudent(matchingStudent, duration);
-          }
-        }
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _logCallDurationForStudent(
-    Student student,
-    int durationSeconds,
-  ) async {
-    final autoLog = await _settingsStore.readAutoLogCallDuration();
-    if (!autoLog) return;
-
-    final durationText = formatCallDuration(durationSeconds);
-    final commentText = durationSeconds > 0
-        ? '[Call Connected • $durationText]'
-        : '[No Answer • 0s]';
-
-    final now = DateTime.now();
-    final formattedNow = _formatReminder(now);
-    final newHistoryEntry = '$formattedNow — $commentText';
-
-    // Prevent duplicate logging if the exact same comment was just logged
-    if (student.commentHistory.isNotEmpty) {
-      final last = student.commentHistory.last;
-      if (last.contains(commentText)) {
-        return;
-      }
-    }
-
-    final updatedHistory = List<String>.of(student.commentHistory)
-      ..add(newHistoryEntry);
-
-    String newStatus = student.callStatus;
-    if (durationSeconds > 0) {
-      if (newStatus == 'Pending' ||
-          newStatus == 'No Answer' ||
-          newStatus == 'Not Responding') {
-        newStatus = 'Follow-up';
-      }
-    } else {
-      if (newStatus == 'Pending') {
-        newStatus = 'No Answer';
-      }
-    }
-
-    final updatedAttempts = List<CallAttempt>.of(student.attempts)
-      ..add(
-        CallAttempt(
-          dateTime: now.toIso8601String(),
-          status: newStatus,
-          comment: commentText,
-        ),
-      );
-
-    final updatedStudent = student.copyWith(
-      callStatus: newStatus,
-      comment: commentText,
-      commentHistory: updatedHistory,
-      attempts: updatedAttempts,
-    );
-
-    final index = _students.indexWhere(
-      (s) =>
-          normalizeContactPhone(s.phone) ==
-          normalizeContactPhone(student.phone),
-    );
-    if (index >= 0) {
-      if (mounted) {
-        setState(() {
-          _students[index] = updatedStudent;
-        });
-      }
-      await _settingsStore.saveCachedStudents(_students);
-
-      if (widget.sheetConfig.isNotEmpty) {
-        try {
-          await widget.sheetService.updateStudentInSheet(
-            widget.sheetConfig,
-            updatedStudent,
-            previousPhone: student.phone,
-          );
-        } catch (_) {
-          await _enqueueOfflineAction(
-            QueuedSheetAction(
-              id: DateTime.now().microsecondsSinceEpoch.toString(),
-              action: 'update',
-              student: updatedStudent,
-              previousPhone: student.phone,
-              queuedAt: DateTime.now(),
-            ),
-          );
-        }
-      }
-    }
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(
-                Icons.check_circle_rounded,
-                color: Color(0xFF62D6B0),
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Logged: $commentText for ${student.name}',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          action: SnackBarAction(
-            label: 'Add Note',
-            textColor: const Color(0xFF62D6B0),
-            onPressed: () => _editStudent(updatedStudent),
-          ),
-          duration: const Duration(seconds: 4),
-        ),
-      );
     }
   }
+
+
 
   Future<void> _startBulkWhatsApp(List<Student> students) async {
     if (students.isEmpty) return;
@@ -10718,7 +10482,6 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
   bool _hasOverlayPermission = false;
   bool _hasPhonePermissions = false;
   bool _isIgnoringBattery = true;
-  bool _autoLogCallDuration = true;
   bool _directCalling = true;
   int _preferredSimSlot = -1;
   bool _floatingCallHead = true;
@@ -10787,8 +10550,6 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
     final hasPhone = await CallerIdService.hasPhonePermissions();
     final isIgnoringBattery =
         await CallerIdService.isIgnoringBatteryOptimizations();
-    final autoLog =
-        await widget.settingsStore?.readAutoLogCallDuration() ?? true;
     final directCalling =
         await widget.settingsStore?.readDirectCalling() ?? true;
     final preferredSimSlot =
@@ -10807,7 +10568,6 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
         _hasOverlayPermission = hasOverlay;
         _hasPhonePermissions = hasPhone;
         _isIgnoringBattery = isIgnoringBattery;
-        _autoLogCallDuration = autoLog;
         _directCalling = directCalling;
         _preferredSimSlot = preferredSimSlot;
         _floatingCallHead = floatingCallHead;
@@ -11375,24 +11135,6 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
                         color: theme.colorScheme.outlineVariant,
                       ),
                       SwitchListTile(
-                        secondary: const Icon(Icons.timer_outlined),
-                        title: const Text('Auto-log Call Duration'),
-                        subtitle: const Text(
-                          'Record [Call Connected • 3 mins 45 secs] in lead history after each call',
-                        ),
-                        value: _autoLogCallDuration,
-                        onChanged: (val) async {
-                          setState(() => _autoLogCallDuration = val);
-                          await widget.settingsStore
-                              ?.saveAutoLogCallDuration(val);
-                        },
-                      ),
-                      Divider(
-                        height: 1,
-                        indent: 56,
-                        color: theme.colorScheme.outlineVariant,
-                      ),
-                      SwitchListTile(
                         secondary: const Icon(Icons.phone_forwarded_rounded),
                         title: const Text('Direct In-App Calling'),
                         subtitle: const Text(
@@ -11426,9 +11168,10 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
                       SwitchListTile(
                         secondary:
                             const Icon(Icons.chat_bubble_outline_rounded),
-                        title: const Text('Floating Call Head & Live Timer'),
+                        title:
+                            const Text('Floating Call Head (1-Tap End Call)'),
                         subtitle: const Text(
-                          'Show floating chat-head with live timer & 1-tap End Call button',
+                          'Show floating card with student name & 1-tap End Call button',
                         ),
                         value: _floatingCallHead,
                         onChanged: (val) async {

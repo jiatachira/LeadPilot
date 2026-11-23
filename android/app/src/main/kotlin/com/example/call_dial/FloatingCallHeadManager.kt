@@ -25,21 +25,6 @@ object FloatingCallHeadManager {
     private const val TAG = "FloatingCallHeadMgr"
     private var overlayView: View? = null
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var startTimeMs: Long = 0L
-    private var isTimerRunning = false
-
-    private val timerRunnable = object : Runnable {
-        override fun run() {
-            if (!isTimerRunning) return
-            val elapsedSec = (System.currentTimeMillis() - startTimeMs) / 1000
-            val minutes = elapsedSec / 60
-            val seconds = elapsedSec % 60
-            val formatted = String.format("%02d:%02d", minutes, seconds)
-
-            overlayView?.findViewById<TextView>(R.id.call_head_timer)?.text = formatted
-            mainHandler.postDelayed(this, 1000)
-        }
-    }
 
     fun show(context: Context, name: String, phone: String) {
         mainHandler.post {
@@ -61,11 +46,9 @@ object FloatingCallHeadManager {
                 overlayView = view
 
                 val tvName = view.findViewById<TextView>(R.id.call_head_name)
-                val tvTimer = view.findViewById<TextView>(R.id.call_head_timer)
                 val btnEnd = view.findViewById<ImageButton>(R.id.call_head_btn_end)
 
                 tvName.text = name.ifBlank { "Student Call" }
-                tvTimer.text = "00:00"
 
                 // End Call button action
                 btnEnd.setOnClickListener {
@@ -150,13 +133,6 @@ object FloatingCallHeadManager {
                 }
 
                 windowManager.addView(view, params)
-
-                // Start Timer
-                startTimeMs = System.currentTimeMillis()
-                isTimerRunning = true
-                mainHandler.removeCallbacks(timerRunnable)
-                mainHandler.postDelayed(timerRunnable, 1000)
-
                 Log.d(TAG, "Floating call head displayed for $name")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to show floating call head", e)
@@ -169,8 +145,6 @@ object FloatingCallHeadManager {
     fun dismiss(context: Context) {
         mainHandler.post {
             try {
-                isTimerRunning = false
-                mainHandler.removeCallbacks(timerRunnable)
                 val appContext = context.applicationContext ?: context
                 val windowManager = appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
                 dismissInternal(windowManager)
@@ -182,8 +156,6 @@ object FloatingCallHeadManager {
 
     private fun dismissInternal(windowManager: WindowManager?) {
         try {
-            isTimerRunning = false
-            mainHandler.removeCallbacks(timerRunnable)
             overlayView?.let { v ->
                 windowManager?.removeView(v)
             }

@@ -2322,7 +2322,7 @@ void main() {
       expect(find.text('Caller ID'), findsOneWidget);
       expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
       expect(testPopupFinder, findsOneWidget);
-      expect(find.text('LeadPilot v1.23.0'), findsOneWidget);
+      expect(find.text('LeadPilot v1.23.1'), findsOneWidget);
 
       await tester.tap(testPopupFinder);
       await tester.pumpAndSettle();
@@ -3660,7 +3660,7 @@ void main() {
       await tester.tap(checkBtn);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
-      expect(find.text('LeadPilot is up to date (v1.23.0).'), findsOneWidget);
+      expect(find.text('LeadPilot is up to date (v1.23.1).'), findsOneWidget);
 
       // Toggle Auto-check
       final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
@@ -4089,7 +4089,7 @@ void main() {
   });
 
   testWidgets(
-    'Settings displays Auto-log Call Duration toggle and updates store',
+    'Settings displays Direct In-App Calling toggle and updates store',
     (tester) async {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(CallerIdService.channel, (call) async {
@@ -4110,26 +4110,26 @@ void main() {
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
 
-      final autoLogFinder = find.text('Auto-log Call Duration');
-      await tester.ensureVisible(autoLogFinder);
+      final directCallingFinder = find.text('Direct In-App Calling');
+      await tester.ensureVisible(directCallingFinder);
       await tester.pumpAndSettle();
 
-      expect(autoLogFinder, findsOneWidget);
+      expect(directCallingFinder, findsOneWidget);
       expect(
         find.text(
-          'Record [Call Connected • 3 mins 45 secs] in lead history after each call',
+          'Call directly without opening dialpad • Keep LeadPilot in front',
         ),
         findsOneWidget,
       );
 
       // Verify toggle action
-      await tester.tap(autoLogFinder);
+      await tester.tap(directCallingFinder);
       await tester.pumpAndSettle();
-      expect(await settingsStore.readAutoLogCallDuration(), isFalse);
+      expect(await settingsStore.readDirectCalling(), isFalse);
 
-      await tester.tap(autoLogFinder);
+      await tester.tap(directCallingFinder);
       await tester.pumpAndSettle();
-      expect(await settingsStore.readAutoLogCallDuration(), isTrue);
+      expect(await settingsStore.readDirectCalling(), isTrue);
 
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(CallerIdService.channel, null);
@@ -4230,6 +4230,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Direct In-App Calling'), findsOneWidget);
-    expect(find.text('Floating Call Head & Live Timer'), findsOneWidget);
+    expect(find.text('Floating Call Head (1-Tap End Call)'), findsOneWidget);
   });
 }

@@ -89,17 +89,6 @@ class PhoneStateReceiver : BroadcastReceiver() {
             }
             TelephonyManager.EXTRA_STATE_IDLE -> {
                 Log.d(TAG, "EXTRA_STATE_IDLE: Phone call ended or idle. Dismissing all overlays/notifications.")
-                // Record call duration if we have an active caller number
-                val targetPhone = activeCallNumber ?: lastShownNumber
-                if (!targetPhone.isNullOrEmpty()) {
-                    val durationSec = if (callStartTimeMs > 0L) {
-                        (System.currentTimeMillis() - callStartTimeMs) / 1000
-                    } else {
-                        0L
-                    }
-                    CallerIdCacheManager.addPendingCallLog(appContext, targetPhone, durationSec, callType)
-                }
-
                 activeCallNumber = null
                 callStartTimeMs = 0L
                 lastShownNumber = null
