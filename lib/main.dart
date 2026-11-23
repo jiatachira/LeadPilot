@@ -22,7 +22,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.19.1';
+const String kAppVersion = '1.20.0';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -5523,6 +5523,21 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  void _toggleSelectAll(List<Student> displayedStudents) {
+    setState(() {
+      final allKeys = displayedStudents.map(_selectionKey).toSet();
+      final allSelected = allKeys.isNotEmpty &&
+          allKeys.every(_selectedStudentKeys.contains);
+      if (allSelected) {
+        _selectedStudentKeys.removeAll(allKeys);
+        if (_selectedStudentKeys.isEmpty) _isSelectionMode = false;
+      } else {
+        _isSelectionMode = true;
+        _selectedStudentKeys.addAll(allKeys);
+      }
+    });
+  }
+
   int _compareStudentsByFollowUpDate(Student left, Student right) {
     final leftDate = tryParseDate(left.nextCallDateTime);
     final rightDate = tryParseDate(right.nextCallDateTime);
@@ -6393,6 +6408,21 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: _isSelectionMode
             ? [
                 IconButton(
+                  tooltip: students.isNotEmpty &&
+                          students.every((s) => _selectedStudentKeys
+                              .contains(_selectionKey(s)))
+                      ? 'Deselect all'
+                      : 'Select all',
+                  onPressed: () => _toggleSelectAll(students),
+                  icon: Icon(
+                    students.isNotEmpty &&
+                            students.every((s) => _selectedStudentKeys
+                                .contains(_selectionKey(s)))
+                        ? Icons.deselect_rounded
+                        : Icons.select_all_rounded,
+                  ),
+                ),
+                IconButton(
                   tooltip: 'Export selected contacts',
                   onPressed: selectedStudents.isEmpty
                       ? null
@@ -6409,6 +6439,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(width: 8),
               ]
             : [
+                IconButton(
+                  tooltip: 'Select multiple leads',
+                  onPressed: () {
+                    setState(() {
+                      _isSelectionMode = true;
+                    });
+                  },
+                  icon: const Icon(Icons.checklist_rounded),
+                ),
                 IconButton(
                   tooltip: 'Settings',
                   onPressed: _openSettings,
@@ -6612,6 +6651,69 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
+      bottomNavigationBar: _isSelectionMode
+          ? Container(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 10,
+                    offset: const Offset(0, -3),
+                  ),
+                ],
+              ),
+              child: SafeArea(
+                top: false,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        key: const Key('bulk_whatsapp_button'),
+                        onPressed: selectedStudents.isEmpty
+                            ? null
+                            : () => _startBulkWhatsApp(selectedStudents),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF25D366),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        icon: const FaIcon(FontAwesomeIcons.whatsapp, size: 18),
+                        label: Text(
+                          'Bulk WhatsApp (${selectedStudents.length})',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton.tonalIcon(
+                        key: const Key('bulk_sms_button'),
+                        onPressed: selectedStudents.isEmpty
+                            ? null
+                            : () => _startBulkSms(selectedStudents),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        icon: const Icon(Icons.sms_outlined, size: 18),
+                        label: Text(
+                          'Bulk SMS (${selectedStudents.length})',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : null,
       floatingActionButton: _isSelectionMode
           ? null
           : FloatingActionButton.extended(
@@ -6637,6 +6739,89 @@ class _HomeScreenState extends State<HomeScreen> {
     } on Exception catch (error) {
       if (mounted) _showMessage('Could not start the call: $error');
     }
+  }
+
+  Future<void> _startBulkWhatsApp(List<Student> students) async {
+    if (students.isEmpty) return;
+
+    final templates = await _settingsStore.readWhatsAppTemplates();
+    if (!mounted) return;
+
+    final payload = await showModalBottomSheet<WhatsAppSendPayload>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => WhatsAppTemplatePickerSheet(
+        student: students.first,
+        templates: templates,
+        isSms: false,
+        onManageTemplates: () async {
+          Navigator.pop(context);
+          await _openWhatsAppTemplatesSettings();
+        },
+      ),
+    );
+
+    if (payload == null || !mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.transparent,
+      builder: (_) => BulkDispatchSheet(
+        students: students,
+        payload: payload,
+        isSms: false,
+        onDispatch: (student, text) => _dispatchWhatsAppMessage(
+          student: student,
+          text: text,
+          documentPaths: payload.documentPaths,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _startBulkSms(List<Student> students) async {
+    if (students.isEmpty) return;
+
+    final templates = await _settingsStore.readWhatsAppTemplates();
+    if (!mounted) return;
+
+    final payload = await showModalBottomSheet<WhatsAppSendPayload>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => WhatsAppTemplatePickerSheet(
+        student: students.first,
+        templates: templates,
+        isSms: true,
+        onManageTemplates: () async {
+          Navigator.pop(context);
+          await _openWhatsAppTemplatesSettings();
+        },
+      ),
+    );
+
+    if (payload == null || !mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.transparent,
+      builder: (_) => BulkDispatchSheet(
+        students: students,
+        payload: payload,
+        isSms: true,
+        onDispatch: (student, text) => _launchSms(
+          student.phone,
+          text: text,
+        ),
+      ),
+    );
   }
 
   Future<void> _openWhatsAppChat(Student student) async {
@@ -11246,6 +11431,536 @@ class _WhatsAppTemplatePickerSheetState
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+enum _BulkItemStatus { pending, sent, skipped }
+
+class BulkDispatchSheet extends StatefulWidget {
+  const BulkDispatchSheet({
+    super.key,
+    required this.students,
+    required this.payload,
+    required this.isSms,
+    required this.onDispatch,
+  });
+
+  final List<Student> students;
+  final WhatsAppSendPayload payload;
+  final bool isSms;
+  final Future<void> Function(Student student, String text) onDispatch;
+
+  @override
+  State<BulkDispatchSheet> createState() => _BulkDispatchSheetState();
+}
+
+class _BulkDispatchSheetState extends State<BulkDispatchSheet> {
+  int _currentIndex = 0;
+  final Map<int, _BulkItemStatus> _statuses = {};
+  bool _isDone = false;
+  bool _isDispatching = false;
+
+  int get _sentCount =>
+      _statuses.values.where((s) => s == _BulkItemStatus.sent).length;
+
+  int get _skippedCount =>
+      _statuses.values.where((s) => s == _BulkItemStatus.skipped).length;
+
+  int get _remainingCount =>
+      widget.students.length - (_sentCount + _skippedCount);
+
+  double get _progress => widget.students.isEmpty
+      ? 1.0
+      : (_sentCount + _skippedCount) / widget.students.length;
+
+  String _formatForStudent(Student student) {
+    final sName = student.name.trim();
+    return widget.payload.message.replaceAll(
+      '{name}',
+      sName.isNotEmpty ? sName : 'there',
+    );
+  }
+
+  void _advanceToNext() {
+    int next = -1;
+    for (int i = 0; i < widget.students.length; i++) {
+      if (!_statuses.containsKey(i)) {
+        next = i;
+        break;
+      }
+    }
+    if (next != -1) {
+      _currentIndex = next;
+    } else {
+      _isDone = true;
+    }
+  }
+
+  Future<void> _sendCurrent() async {
+    if (_isDispatching || _currentIndex >= widget.students.length) return;
+    setState(() => _isDispatching = true);
+
+    final student = widget.students[_currentIndex];
+    final personalizedText = _formatForStudent(student);
+
+    try {
+      await widget.onDispatch(student, personalizedText);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDispatching = false;
+          _statuses[_currentIndex] = _BulkItemStatus.sent;
+          _advanceToNext();
+        });
+      }
+    }
+  }
+
+  void _skipCurrent() {
+    if (_currentIndex >= widget.students.length) return;
+    setState(() {
+      _statuses[_currentIndex] = _BulkItemStatus.skipped;
+      _advanceToNext();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.88,
+      ),
+      padding: EdgeInsets.fromLTRB(
+        20,
+        12,
+        20,
+        MediaQuery.viewInsetsOf(context).bottom + 20,
+      ),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                height: 4,
+                width: 40,
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF526170)
+                      : const Color(0xFFDDE3E9),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: widget.isSms
+                      ? const Color(0xFF2E6FA3).withValues(alpha: 0.15)
+                      : const Color(0xFF25D366).withValues(alpha: 0.15),
+                  child: widget.isSms
+                      ? const Icon(
+                          Icons.sms_rounded,
+                          size: 18,
+                          color: Color(0xFF2E6FA3),
+                        )
+                      : const FaIcon(
+                          FontAwesomeIcons.whatsapp,
+                          size: 18,
+                          color: Color(0xFF25D366),
+                        ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.isSms ? 'Bulk SMS Queue' : 'Bulk WhatsApp Queue',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      Text(
+                        '${widget.students.length} students in queue',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  tooltip: 'Close queue',
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: _progress,
+                minHeight: 8,
+                backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  widget.isSms
+                      ? const Color(0xFF2E6FA3)
+                      : const Color(0xFF25D366),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Sent: $_sentCount • Skipped: $_skippedCount',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                Text(
+                  '$_remainingCount remaining',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            if (_isDone) ...[
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 36, horizontal: 16),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  children: [
+                    const Icon(
+                      Icons.check_circle_rounded,
+                      size: 64,
+                      color: Color(0xFF25D366),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'All Messages Dispatched!',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Successfully processed ${widget.students.length} student(s) with personalized messages.',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 32,
+                          vertical: 12,
+                        ),
+                      ),
+                      child: const Text('Done'),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              _buildCurrentStudentCard(context, theme),
+              const SizedBox(height: 12),
+              Text(
+                'Queue Overview (${widget.students.length})',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: widget.students.length,
+                  separatorBuilder: (ctx, i) => const SizedBox(height: 6),
+                  itemBuilder: (ctx, i) {
+                    final student = widget.students[i];
+                    final status = _statuses[i] ?? _BulkItemStatus.pending;
+                    final isCurrent = i == _currentIndex;
+
+                    Widget statusIcon;
+                    String statusLabel;
+                    Color statusColor;
+
+                    if (status == _BulkItemStatus.sent) {
+                      statusIcon = const Icon(
+                        Icons.check_circle,
+                        size: 16,
+                        color: Color(0xFF25D366),
+                      );
+                      statusLabel = 'Sent';
+                      statusColor = const Color(0xFF25D366);
+                    } else if (status == _BulkItemStatus.skipped) {
+                      statusIcon = const Icon(
+                        Icons.skip_next,
+                        size: 16,
+                        color: Colors.orange,
+                      );
+                      statusLabel = 'Skipped';
+                      statusColor = Colors.orange;
+                    } else if (isCurrent) {
+                      statusIcon = Icon(
+                        Icons.play_circle_fill,
+                        size: 16,
+                        color: theme.colorScheme.primary,
+                      );
+                      statusLabel = 'Current';
+                      statusColor = theme.colorScheme.primary;
+                    } else {
+                      statusIcon = Icon(
+                        Icons.radio_button_unchecked,
+                        size: 16,
+                        color: theme.colorScheme.outline,
+                      );
+                      statusLabel = 'Pending';
+                      statusColor = theme.colorScheme.outline;
+                    }
+
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () {
+                        setState(() {
+                          _currentIndex = i;
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isCurrent
+                              ? theme.colorScheme.primaryContainer
+                                  .withValues(alpha: 0.3)
+                              : theme.colorScheme.surfaceContainerLow,
+                          borderRadius: BorderRadius.circular(10),
+                          border: isCurrent
+                              ? Border.all(
+                                  color: theme.colorScheme.primary,
+                                  width: 1.2,
+                                )
+                              : null,
+                        ),
+                        child: Row(
+                          children: [
+                            statusIcon,
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                student.name,
+                                style: TextStyle(
+                                  fontWeight: isCurrent
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Text(
+                              statusLabel,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: statusColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCurrentStudentCard(BuildContext context, ThemeData theme) {
+    final currentStudent = widget.students[_currentIndex];
+    final personalizedText = _formatForStudent(currentStudent);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '${_currentIndex + 1} of ${widget.students.length}',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onPrimaryContainer,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Icon(
+                Icons.phone_rounded,
+                size: 14,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                currentStudent.phone,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            currentStudent.name,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          if (widget.payload.hasDocuments && !widget.isSms) ...[
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color:
+                    theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.attach_file,
+                    size: 14,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      '${widget.payload.documentPaths.length} document(s) attached',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+              ),
+            ),
+            child: Text(
+              personalizedText.isNotEmpty
+                  ? personalizedText
+                  : '(Document attachment only)',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: personalizedText.isNotEmpty
+                    ? theme.colorScheme.onSurface
+                    : theme.colorScheme.outline,
+                fontStyle: personalizedText.isEmpty ? FontStyle.italic : null,
+              ),
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _isDispatching ? null : _sendCurrent,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: widget.isSms
+                        ? const Color(0xFF2E6FA3)
+                        : const Color(0xFF25D366),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: widget.isSms
+                      ? const Icon(Icons.send_rounded, size: 18)
+                      : const FaIcon(FontAwesomeIcons.whatsapp, size: 18),
+                  label: Text(
+                    'Send to ${currentStudent.name.split(" ").first}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: _skipCurrent,
+                style: OutlinedButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Skip'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

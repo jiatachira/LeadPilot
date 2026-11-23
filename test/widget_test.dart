@@ -2308,7 +2308,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.19.1'), findsOneWidget);
+    expect(find.text('LeadPilot v1.20.0'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -3534,7 +3534,7 @@ void main() {
     await tester.tap(checkBtn);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
-    expect(find.text('LeadPilot is up to date (v1.19.1).'), findsOneWidget);
+    expect(find.text('LeadPilot is up to date (v1.20.0).'), findsOneWidget);
 
     // Toggle Auto-check
     final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
@@ -3876,5 +3876,69 @@ void main() {
     expect(dispatchedResult!.message, isEmpty);
     expect(dispatchedResult!.documentPaths, ['/mock/prospectus.pdf']);
     expect(dispatchedResult!.hasDocuments, isTrue);
+  });
+
+  testWidgets(
+      'BulkDispatchSheet processes students in queue with personalized text and skip support',
+      (tester) async {
+    final students = [
+      Student(name: 'Amal Silva', phone: '0712345678'),
+      Student(name: 'Bimal Fernando', phone: '0723456789'),
+    ];
+
+    const payload = WhatsAppSendPayload(
+      message: 'Hello {name}, your course starts soon!',
+      documentPaths: ['/mock/brochure.pdf'],
+    );
+
+    final dispatched = <({String studentName, String text})>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: BulkDispatchSheet(
+            students: students,
+            payload: payload,
+            isSms: false,
+            onDispatch: (student, text) async {
+              dispatched.add((studentName: student.name, text: text));
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Bulk WhatsApp Queue'), findsOneWidget);
+    expect(find.text('2 students in queue'), findsOneWidget);
+    expect(find.text('Amal Silva'), findsWidgets);
+    expect(
+      find.text('Hello Amal Silva, your course starts soon!'),
+      findsOneWidget,
+    );
+    expect(find.text('1 document(s) attached'), findsOneWidget);
+
+    // Send first student
+    await tester.tap(find.text('Send to Amal'));
+    await tester.pumpAndSettle();
+
+    expect(dispatched.length, 1);
+    expect(dispatched[0].studentName, 'Amal Silva');
+    expect(dispatched[0].text, 'Hello Amal Silva, your course starts soon!');
+
+    // Now on Bimal
+    expect(find.text('Bimal Fernando'), findsWidgets);
+    expect(
+      find.text('Hello Bimal Fernando, your course starts soon!'),
+      findsOneWidget,
+    );
+
+    // Skip second student
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+
+    // All done
+    expect(find.text('All Messages Dispatched!'), findsOneWidget);
+    expect(find.text('Done'), findsOneWidget);
   });
 }
