@@ -22,7 +22,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.19.0';
+const String kAppVersion = '1.19.1';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -6727,7 +6727,7 @@ class _HomeScreenState extends State<HomeScreen> {
         await SharePlus.instance.share(
           ShareParams(
             files: xFiles,
-            text: text,
+            text: text.trim().isNotEmpty ? text.trim() : null,
             subject: 'Document for ${student.name}',
           ),
         );
@@ -6737,7 +6737,10 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
     } else {
-      await _launchWhatsApp(number, text: text);
+      await _launchWhatsApp(
+        number,
+        text: text.trim().isNotEmpty ? text.trim() : null,
+      );
     }
   }
 
@@ -10871,8 +10874,10 @@ class _WhatsAppTemplatePickerSheetState
         .toList();
     if (selected.isEmpty) return;
 
-    final combinedMessage =
-        selected.map((t) => _formatMessage(t.message)).join('\n\n');
+    final combinedMessage = selected
+        .map((t) => _formatMessage(t.message).trim())
+        .where((msg) => msg.isNotEmpty)
+        .join('\n\n');
 
     final docs = <String>[];
     if (!widget.isSms) {
@@ -11161,15 +11166,17 @@ class _WhatsAppTemplatePickerSheetState
                                     ),
                                 ],
                               ),
-                              const SizedBox(height: 8),
-                              Text(
-                                preview,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
+                              if (preview.trim().isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  preview,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                              ],
                               if (item.hasDocument && !widget.isSms) ...[
                                 const SizedBox(height: 8),
                                 Container(
@@ -11309,6 +11316,7 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
           _documentPath = file.path;
           _documentName = file.name;
         });
+        _formKey.currentState?.validate();
       }
     } catch (e) {
       debugPrint('Error picking file: $e');
@@ -11357,18 +11365,22 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
               const SizedBox(height: 14),
               TextFormField(
                 controller: _messageController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Message',
                   hintText: 'e.g. Hello {name}, your class starts tomorrow.',
-                  helperText: 'Tip: Use {name} for student name',
-                  border: OutlineInputBorder(),
+                  helperText: _documentPath != null
+                      ? 'Optional when document is attached'
+                      : 'Tip: Use {name} for student name',
+                  border: const OutlineInputBorder(),
                 ),
                 maxLines: 4,
                 minLines: 2,
                 textCapitalization: TextCapitalization.sentences,
                 validator: (val) {
-                  if (val == null || val.trim().isEmpty) {
-                    return 'Please enter message content';
+                  final hasDoc = _documentPath != null &&
+                      _documentPath!.trim().isNotEmpty;
+                  if ((val == null || val.trim().isEmpty) && !hasDoc) {
+                    return 'Please enter message content or attach a document';
                   }
                   return null;
                 },
@@ -11460,6 +11472,7 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
                                   _documentPath = null;
                                   _documentName = null;
                                 });
+                                _formKey.currentState?.validate();
                               },
                             ),
                           ],
@@ -11802,13 +11815,15 @@ class _ManageWhatsAppTemplatesSheetState
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              item.message,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
+                            if (item.message.trim().isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                item.message,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
                               ),
-                            ),
+                            ],
                             if (item.hasDocument) ...[
                               const SizedBox(height: 6),
                               Row(

@@ -2308,7 +2308,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.19.0'), findsOneWidget);
+    expect(find.text('LeadPilot v1.19.1'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -3534,7 +3534,7 @@ void main() {
     await tester.tap(checkBtn);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
-    expect(find.text('LeadPilot is up to date (v1.19.0).'), findsOneWidget);
+    expect(find.text('LeadPilot is up to date (v1.19.1).'), findsOneWidget);
 
     // Toggle Auto-check
     final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
@@ -3797,5 +3797,84 @@ void main() {
       'Hello Nimal Perera, welcome to our institute!\n\nHere is the course syllabus.',
     );
     expect(dispatchedResult!.documentPaths, ['/mock/syllabus.pdf']);
+  });
+
+  test('WhatsAppTemplate allows document only without message text', () {
+    const docOnlyTemplate = WhatsAppTemplate(
+      id: 'doc_only_1',
+      name: 'Fee Structure PDF',
+      message: '',
+      documentPath: '/mock/fees.pdf',
+      documentName: 'fees.pdf',
+    );
+
+    expect(docOnlyTemplate.hasDocument, isTrue);
+    expect(docOnlyTemplate.message, isEmpty);
+
+    final json = docOnlyTemplate.toJson();
+    final restored = WhatsAppTemplate.fromJson(json);
+    expect(restored.hasDocument, isTrue);
+    expect(restored.message, isEmpty);
+    expect(restored.documentName, 'fees.pdf');
+  });
+
+  testWidgets(
+      'WhatsApp Template picker sends template with document only when message is empty',
+      (tester) async {
+    final student = Student(
+      name: 'Kasun Dias',
+      phone: '0711111111',
+    );
+
+    final templates = [
+      const WhatsAppTemplate(
+        id: 'doc_only',
+        name: 'Prospectus PDF',
+        message: '',
+        documentPath: '/mock/prospectus.pdf',
+        documentName: 'prospectus.pdf',
+      ),
+    ];
+
+    WhatsAppSendPayload? dispatchedResult;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (ctx) => ElevatedButton(
+              onPressed: () async {
+                dispatchedResult =
+                    await showModalBottomSheet<WhatsAppSendPayload>(
+                  context: ctx,
+                  isScrollControlled: true,
+                  builder: (_) => WhatsAppTemplatePickerSheet(
+                    student: student,
+                    templates: templates,
+                    onManageTemplates: () {},
+                  ),
+                );
+              },
+              child: const Text('Open Sheet'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open Sheet'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Prospectus PDF'), findsOneWidget);
+    expect(find.text('prospectus.pdf'), findsOneWidget);
+
+    // Tap single template
+    await tester.tap(find.text('Prospectus PDF'));
+    await tester.pumpAndSettle();
+
+    expect(dispatchedResult, isNotNull);
+    expect(dispatchedResult!.message, isEmpty);
+    expect(dispatchedResult!.documentPaths, ['/mock/prospectus.pdf']);
+    expect(dispatchedResult!.hasDocuments, isTrue);
   });
 }
