@@ -2322,7 +2322,7 @@ void main() {
       expect(find.text('Caller ID'), findsOneWidget);
       expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
       expect(testPopupFinder, findsOneWidget);
-      expect(find.text('LeadPilot v1.23.1'), findsOneWidget);
+      expect(find.text('LeadPilot v1.23.2'), findsOneWidget);
 
       await tester.tap(testPopupFinder);
       await tester.pumpAndSettle();
@@ -3660,7 +3660,7 @@ void main() {
       await tester.tap(checkBtn);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
-      expect(find.text('LeadPilot is up to date (v1.23.1).'), findsOneWidget);
+      expect(find.text('LeadPilot is up to date (v1.23.2).'), findsOneWidget);
 
       // Toggle Auto-check
       final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
@@ -4194,11 +4194,12 @@ void main() {
     expect(formatCallTimer(-5), '00:00');
   });
 
-  test('MemoryAppSettingsStore stores and reads directCalling, preferredSimSlot, and floatingCallHead', () async {
+  test('MemoryAppSettingsStore stores and reads directCalling, preferredSimSlot, floatingCallHead, and preferredCallingApp', () async {
     final store = MemoryAppSettingsStore();
     expect(await store.readDirectCalling(), isTrue);
     expect(await store.readPreferredSimSlot(), -1);
     expect(await store.readFloatingCallHead(), isTrue);
+    expect(await store.readPreferredCallingApp(), '');
 
     await store.saveDirectCalling(false);
     expect(await store.readDirectCalling(), isFalse);
@@ -4208,6 +4209,9 @@ void main() {
 
     await store.saveFloatingCallHead(false);
     expect(await store.readFloatingCallHead(), isFalse);
+
+    await store.savePreferredCallingApp('com.google.android.dialer');
+    expect(await store.readPreferredCallingApp(), 'com.google.android.dialer');
   });
 
   testWidgets('Settings displays Direct In-App Calling and Floating Call Head toggles', (tester) async {

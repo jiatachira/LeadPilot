@@ -22,7 +22,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.23.1';
+const String kAppVersion = '1.23.2';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -786,6 +786,10 @@ abstract interface class AppSettingsStore {
   Future<bool> readFloatingCallHead();
 
   Future<void> saveFloatingCallHead(bool enabled);
+
+  Future<String> readPreferredCallingApp();
+
+  Future<void> savePreferredCallingApp(String packageName);
 }
 
 class SecureAppSettingsStore implements AppSettingsStore {
@@ -809,6 +813,7 @@ class SecureAppSettingsStore implements AppSettingsStore {
   static const _directCallingKey = 'student_call_direct_calling';
   static const _preferredSimSlotKey = 'student_call_preferred_sim_slot';
   static const _floatingCallHeadKey = 'student_call_floating_call_head';
+  static const _preferredCallingAppKey = 'student_call_preferred_calling_app';
   final FlutterSecureStorage _storage;
 
   @override
@@ -1016,6 +1021,16 @@ class SecureAppSettingsStore implements AppSettingsStore {
       _storage.write(key: _floatingCallHeadKey, value: enabled.toString());
 
   @override
+  Future<String> readPreferredCallingApp() async {
+    final value = await _storage.read(key: _preferredCallingAppKey);
+    return value ?? '';
+  }
+
+  @override
+  Future<void> savePreferredCallingApp(String packageName) =>
+      _storage.write(key: _preferredCallingAppKey, value: packageName);
+
+  @override
   Future<void> saveSheetConfig(String url, {String name = ''}) async {
     final normalizedUrl = url.trim();
     final linkedSheets = await readLinkedSheets();
@@ -1200,12 +1215,22 @@ class MemoryAppSettingsStore implements AppSettingsStore {
     preferredSimSlot = slot;
   }
 
+  String preferredCallingApp = '';
+
   @override
   Future<bool> readFloatingCallHead() async => floatingCallHead;
 
   @override
   Future<void> saveFloatingCallHead(bool enabled) async {
     floatingCallHead = enabled;
+  }
+
+  @override
+  Future<String> readPreferredCallingApp() async => preferredCallingApp;
+
+  @override
+  Future<void> savePreferredCallingApp(String packageName) async {
+    preferredCallingApp = packageName;
   }
 }
 
@@ -1418,11 +1443,37 @@ class CallerIdService {
     }
   }
 
+  static Future<List<Map<String, dynamic>>> getCallingApps() async {
+    try {
+      final res = await channel.invokeListMethod<dynamic>('getCallingApps');
+      if (res == null) return [];
+      return res
+          .whereType<Map>()
+          .map((m) => m.map((k, v) => MapEntry(k.toString(), v)))
+          .toList();
+    } on MissingPluginException {
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> openDefaultAppsSettings() async {
+    try {
+      await channel.invokeMethod('openDefaultAppsSettings');
+    } on MissingPluginException {
+      // Platform channel not implemented in test environment.
+    } catch (_) {
+      // Ignore failures opening settings.
+    }
+  }
+
   static Future<bool> directCall({
     required String phone,
     int simSlot = -1,
     String? name,
     bool showFloatingHead = true,
+    String? callingAppPackage,
   }) async {
     try {
       final res = await channel.invokeMethod<bool>('directCall', {
@@ -1430,6 +1481,7 @@ class CallerIdService {
         'simSlot': simSlot,
         'name': name,
         'showFloatingHead': showFloatingHead,
+        'callingAppPackage': callingAppPackage,
       });
       return res ?? false;
     } on MissingPluginException {
@@ -7217,6 +7269,128 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  Future<String?> _showCallingAppChoiceSheet(
+    Student student,
+    List<Map<String, dynamic>> apps,
+  ) async {
+    bool remember = true;
+    return showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final theme = Theme.of(context);
+            return SafeArea(
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.onSurfaceVariant
+                              .withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        const Icon(Icons.phone_forwarded_rounded,
+                            color: _green, size: 24),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Select Calling App',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Choose which app makes calls without asking each time',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ...apps.map((app) {
+                      final pkg = app['packageName']?.toString() ?? '';
+                      final name = app['appName']?.toString() ?? pkg;
+                      final is3cx = name.toLowerCase().contains('3cx') ||
+                          pkg.toLowerCase().contains('tcx');
+                      final isSystem = !is3cx;
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            side: BorderSide(
+                                color: theme.colorScheme.outlineVariant),
+                          ),
+                          leading: CircleAvatar(
+                            backgroundColor: is3cx
+                                ? const Color(0xFF0079C1)
+                                    .withValues(alpha: 0.15)
+                                : _green.withValues(alpha: 0.15),
+                            foregroundColor:
+                                is3cx ? const Color(0xFF0079C1) : _green,
+                            child: Icon(
+                              is3cx
+                                  ? Icons.phone_in_talk
+                                  : Icons.call_outlined,
+                            ),
+                          ),
+                          title: Text(
+                            isSystem ? '$name (SIM Call)' : name,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: Text(pkg),
+                          trailing: const Icon(Icons.chevron_right_rounded),
+                          onTap: () async {
+                            if (remember) {
+                              await _settingsStore
+                                  .savePreferredCallingApp(pkg);
+                            }
+                            if (ctx.mounted) Navigator.of(ctx).pop(pkg);
+                          },
+                        ),
+                      );
+                    }),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: remember,
+                      title: const Text('Always use this app for calls'),
+                      subtitle:
+                          const Text('You can change this anytime in Settings'),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      onChanged: (val) {
+                        setSheetState(() => remember = val ?? false);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _callStudent(Student student) async {
     try {
       final directCalling = await _settingsStore.readDirectCalling();
@@ -7237,6 +7411,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             }
           }
 
+          String preferredApp =
+              await _settingsStore.readPreferredCallingApp();
+          if (preferredApp.isEmpty) {
+            final callingApps = await CallerIdService.getCallingApps();
+            if (callingApps.length > 1 && mounted) {
+              final chosenApp =
+                  await _showCallingAppChoiceSheet(student, callingApps);
+              if (chosenApp == null) return;
+              preferredApp = chosenApp;
+            }
+          }
+
           final floatingHead = await _settingsStore.readFloatingCallHead();
           _pendingCallStudent = student;
           _callStartedAt = DateTime.now();
@@ -7250,6 +7436,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             simSlot: preferredSlot,
             name: student.name,
             showFloatingHead: floatingHead,
+            callingAppPackage: preferredApp,
           );
 
           if (!success && mounted) {
@@ -10484,8 +10671,10 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
   bool _isIgnoringBattery = true;
   bool _directCalling = true;
   int _preferredSimSlot = -1;
+  String _preferredCallingApp = '';
   bool _floatingCallHead = true;
   List<Map<String, dynamic>> _detectedSimSlots = [];
+  List<Map<String, dynamic>> _detectedCallingApps = [];
   int _cachedCount = 0;
   String _geminiApiKey = '';
   bool _autoCheckUpdates = true;
@@ -10554,9 +10743,12 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
         await widget.settingsStore?.readDirectCalling() ?? true;
     final preferredSimSlot =
         await widget.settingsStore?.readPreferredSimSlot() ?? -1;
+    final preferredCallingApp =
+        await widget.settingsStore?.readPreferredCallingApp() ?? '';
     final floatingCallHead =
         await widget.settingsStore?.readFloatingCallHead() ?? true;
     final sims = await CallerIdService.getSimSlots();
+    final callingApps = await CallerIdService.getCallingApps();
     var count = await CallerIdService.getCachedCount();
     if (count == 0 && widget.students.isNotEmpty) {
       await CallerIdService.syncStudents(widget.students);
@@ -10570,8 +10762,10 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
         _isIgnoringBattery = isIgnoringBattery;
         _directCalling = directCalling;
         _preferredSimSlot = preferredSimSlot;
+        _preferredCallingApp = preferredCallingApp;
         _floatingCallHead = floatingCallHead;
         _detectedSimSlots = sims;
+        _detectedCallingApps = callingApps;
         _cachedCount = count > 0 ? count : widget.students.length;
       });
     }
@@ -10643,6 +10837,93 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
     final display =
         match['displayName']?.toString() ?? 'SIM ${_preferredSimSlot + 1}';
     return carrier.isNotEmpty ? '$display ($carrier)' : display;
+  }
+
+  Future<void> _showCallingAppDialog() async {
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Default Calling App'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(ctx).pop(''),
+            child: Row(
+              children: [
+                Icon(
+                  _preferredCallingApp.isEmpty
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
+                  color: _green,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text('Always Ask / System Chooser'),
+                ),
+              ],
+            ),
+          ),
+          ..._detectedCallingApps.map((app) {
+            final pkg = app['packageName']?.toString() ?? '';
+            final name = app['appName']?.toString() ?? pkg;
+            final is3cx = name.toLowerCase().contains('3cx') ||
+                pkg.toLowerCase().contains('tcx');
+            final isSelected = _preferredCallingApp == pkg;
+            return SimpleDialogOption(
+              onPressed: () => Navigator.of(ctx).pop(pkg),
+              child: Row(
+                children: [
+                  Icon(
+                    isSelected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: _green,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          is3cx ? name : '$name (SIM Call)',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        Text(
+                          pkg,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context).colorScheme.outline,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+
+    if (selected != null) {
+      setState(() => _preferredCallingApp = selected);
+      await widget.settingsStore?.savePreferredCallingApp(selected);
+    }
+  }
+
+  String _getCallingAppSubtitle() {
+    if (_preferredCallingApp.isEmpty) return 'Always Ask / System Chooser';
+    final match = _detectedCallingApps.firstWhere(
+      (a) => a['packageName'] == _preferredCallingApp,
+      orElse: () => {},
+    );
+    if (match.isEmpty) return _preferredCallingApp;
+    final name = match['appName']?.toString() ?? _preferredCallingApp;
+    final is3cx = name.toLowerCase().contains('3cx') ||
+        _preferredCallingApp.toLowerCase().contains('tcx');
+    return is3cx ? name : '$name (SIM Call)';
   }
 
   Future<void> _requestPermissions() async {
@@ -11158,6 +11439,20 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
                           subtitle: Text(_getSimSlotSubtitle()),
                           trailing: const Icon(Icons.chevron_right_rounded),
                           onTap: _showDefaultSimDialog,
+                        ),
+                      ],
+                      if (_detectedCallingApps.length > 1) ...[
+                        Divider(
+                          height: 1,
+                          indent: 56,
+                          color: theme.colorScheme.outlineVariant,
+                        ),
+                        ListTile(
+                          leading: const Icon(Icons.phone_android_rounded),
+                          title: const Text('Default Calling App (Phone / 3CX)'),
+                          subtitle: Text(_getCallingAppSubtitle()),
+                          trailing: const Icon(Icons.chevron_right_rounded),
+                          onTap: _showCallingAppDialog,
                         ),
                       ],
                       Divider(

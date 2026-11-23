@@ -279,6 +279,51 @@ class MainActivity : FlutterFragmentActivity() {
                             result.success(emptyList<Map<String, Any>>())
                         }
                     }
+                    "getCallingApps" -> {
+                        try {
+                            val testIntent = Intent(Intent.ACTION_CALL, Uri.parse("tel:12345"))
+                            val resolveList = packageManager.queryIntentActivities(testIntent, 0)
+                            val apps = mutableListOf<Map<String, Any>>()
+                            val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
+                            val defaultPkg = telecomManager?.defaultDialerPackage ?: ""
+                            val seenPackages = mutableSetOf<String>()
+
+                            for (ri in resolveList) {
+                                val pkg = ri.activityInfo.packageName
+                                if (pkg == packageName || seenPackages.contains(pkg)) continue
+                                seenPackages.add(pkg)
+                                val appLabel = ri.loadLabel(packageManager).toString()
+                                val isDefault = (pkg == defaultPkg)
+                                apps.add(mapOf(
+                                    "packageName" to pkg,
+                                    "appName" to appLabel,
+                                    "isDefault" to isDefault
+                                ))
+                            }
+                            result.success(apps)
+                        } catch (e: Exception) {
+                            result.success(emptyList<Map<String, Any>>())
+                        }
+                    }
+                    "openDefaultAppsSettings" -> {
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                                val intent = Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(intent)
+                                result.success(true)
+                            } else {
+                                val intent = Intent(Settings.ACTION_SETTINGS).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(intent)
+                                result.success(true)
+                            }
+                        } catch (e: Exception) {
+                            result.error("SETTINGS_ERROR", e.message, null)
+                        }
+                    }
                     "hasCallPhonePermission" -> {
                         val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
                         result.success(granted)
@@ -318,9 +363,29 @@ class MainActivity : FlutterFragmentActivity() {
                             }
 
                             val cleanPhone = phone.trim()
+                            val callingAppPackage = call.argument<String>("callingAppPackage")
                             val intent = Intent(Intent.ACTION_CALL).apply {
                                 data = Uri.parse("tel:${Uri.encode(cleanPhone)}")
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+
+                            if (!callingAppPackage.isNullOrEmpty() && callingAppPackage != "auto" && callingAppPackage != "chooser") {
+                                intent.setPackage(callingAppPackage)
+                            } else if (callingAppPackage != "chooser") {
+                                val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
+                                val defaultDialer = telecomManager?.defaultDialerPackage
+                                if (!defaultDialer.isNullOrEmpty()) {
+                                    intent.setPackage(defaultDialer)
+                                } else {
+                                    val resolveList = packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                                    val systemDialer = resolveList.firstOrNull { ri ->
+                                        val p = ri.activityInfo.packageName.lowercase()
+                                        p.contains("dialer") || p.contains("phone") || p.contains("telecom")
+                                    } ?: resolveList.firstOrNull()
+                                    if (systemDialer != null) {
+                                        intent.setPackage(systemDialer.activityInfo.packageName)
+                                    }
+                                }
                             }
 
                             if (simSlot >= 0) {
