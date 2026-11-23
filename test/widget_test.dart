@@ -2322,7 +2322,7 @@ void main() {
       expect(find.text('Caller ID'), findsOneWidget);
       expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
       expect(testPopupFinder, findsOneWidget);
-      expect(find.text('LeadPilot v1.22.1'), findsOneWidget);
+      expect(find.text('LeadPilot v1.23.0'), findsOneWidget);
 
       await tester.tap(testPopupFinder);
       await tester.pumpAndSettle();
@@ -3660,7 +3660,7 @@ void main() {
       await tester.tap(checkBtn);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
-      expect(find.text('LeadPilot is up to date (v1.22.1).'), findsOneWidget);
+      expect(find.text('LeadPilot is up to date (v1.23.0).'), findsOneWidget);
 
       // Toggle Auto-check
       final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
@@ -4183,4 +4183,53 @@ void main() {
       expect(payload!.message, 'Hello {name}, welcome to class!');
     },
   );
+
+  test('formatCallTimer formats elapsed seconds into mm:ss monospace clock', () {
+    expect(formatCallTimer(0), '00:00');
+    expect(formatCallTimer(9), '00:09');
+    expect(formatCallTimer(45), '00:45');
+    expect(formatCallTimer(60), '01:00');
+    expect(formatCallTimer(125), '02:05');
+    expect(formatCallTimer(3600), '60:00');
+    expect(formatCallTimer(-5), '00:00');
+  });
+
+  test('MemoryAppSettingsStore stores and reads directCalling, preferredSimSlot, and floatingCallHead', () async {
+    final store = MemoryAppSettingsStore();
+    expect(await store.readDirectCalling(), isTrue);
+    expect(await store.readPreferredSimSlot(), -1);
+    expect(await store.readFloatingCallHead(), isTrue);
+
+    await store.saveDirectCalling(false);
+    expect(await store.readDirectCalling(), isFalse);
+
+    await store.savePreferredSimSlot(1);
+    expect(await store.readPreferredSimSlot(), 1);
+
+    await store.saveFloatingCallHead(false);
+    expect(await store.readFloatingCallHead(), isFalse);
+  });
+
+  testWidgets('Settings displays Direct In-App Calling and Floating Call Head toggles', (tester) async {
+    final store = MemoryAppSettingsStore();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SettingsHubSheet(
+            themeMode: ThemeMode.system,
+            onThemeModeChanged: (_) async {},
+            isSheetConnected: true,
+            hasActiveFilters: false,
+            biometricEnabled: false,
+            onBiometricChanged: (_) async {},
+            settingsStore: store,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Direct In-App Calling'), findsOneWidget);
+    expect(find.text('Floating Call Head & Live Timer'), findsOneWidget);
+  });
 }

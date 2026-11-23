@@ -106,6 +106,7 @@ class PhoneStateReceiver : BroadcastReceiver() {
                 CallerIdNotificationHelper.cancel(appContext)
                 CallerIdActivity.dismissCurrent()
                 CallerIdOverlayManager.dismiss(appContext)
+                FloatingCallHeadManager.dismiss(appContext)
             }
         }
     }

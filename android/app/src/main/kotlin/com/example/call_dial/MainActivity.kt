@@ -12,6 +12,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.CallLog
 import android.provider.Settings
+import android.telecom.TelecomManager
+import android.telephony.SubscriptionManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterFragmentActivity
@@ -27,6 +29,8 @@ class MainActivity : FlutterFragmentActivity() {
 
     private var pendingPhonePermissionResult: MethodChannel.Result? = null
     private val phonePermissionRequestCode = 2001
+    private var pendingCallPermissionResult: MethodChannel.Result? = null
+    private val callPermissionRequestCode = 2002
     private var pendingSpeechResult: MethodChannel.Result? = null
     private val speechRecognitionRequestCode = 3001
 
@@ -246,6 +250,137 @@ class MainActivity : FlutterFragmentActivity() {
                             result.success(list)
                         } catch (e: Exception) {
                             result.error("PENDING_LOGS_ERROR", e.message, null)
+                        }
+                    }
+                    "getSimSlots" -> {
+                        try {
+                            val slots = mutableListOf<Map<String, Any>>()
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                                val subscriptionManager = getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as? SubscriptionManager
+                                if (subscriptionManager != null &&
+                                    ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
+                                    val list = subscriptionManager.activeSubscriptionInfoList
+                                    if (list != null) {
+                                        for (info in list) {
+                                            val carrier = info.carrierName?.toString() ?: ""
+                                            val display = info.displayName?.toString() ?: "SIM ${info.simSlotIndex + 1}"
+                                            slots.add(mapOf(
+                                                "slotIndex" to info.simSlotIndex,
+                                                "subscriptionId" to info.subscriptionId,
+                                                "displayName" to display,
+                                                "carrierName" to carrier
+                                            ))
+                                        }
+                                    }
+                                }
+                            }
+                            result.success(slots)
+                        } catch (e: Exception) {
+                            result.success(emptyList<Map<String, Any>>())
+                        }
+                    }
+                    "hasCallPhonePermission" -> {
+                        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+                        result.success(granted)
+                    }
+                    "requestCallPhonePermission" -> {
+                        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+                        if (granted) {
+                            result.success(true)
+                        } else {
+                            val permissions = mutableListOf(Manifest.permission.CALL_PHONE)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                permissions.add(Manifest.permission.ANSWER_PHONE_CALLS)
+                            }
+                            pendingCallPermissionResult = result
+                            ActivityCompat.requestPermissions(
+                                this,
+                                permissions.toTypedArray(),
+                                callPermissionRequestCode
+                            )
+                        }
+                    }
+                    "directCall" -> {
+                        try {
+                            val phone = call.argument<String>("phone") ?: ""
+                            val simSlot = call.argument<Int>("simSlot") ?: -1
+                            val name = call.argument<String>("name") ?: ""
+                            val showHead = call.argument<Boolean>("showFloatingHead") ?: true
+
+                            if (phone.isBlank()) {
+                                result.error("INVALID_PHONE", "Phone number is empty", null)
+                                return@setMethodCallHandler
+                            }
+
+                            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
+                                result.error("PERMISSION_DENIED", "CALL_PHONE permission is not granted", null)
+                                return@setMethodCallHandler
+                            }
+
+                            val cleanPhone = phone.trim()
+                            val intent = Intent(Intent.ACTION_CALL).apply {
+                                data = Uri.parse("tel:${Uri.encode(cleanPhone)}")
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+
+                            if (simSlot >= 0) {
+                                intent.putExtra("simSlot", simSlot)
+                                intent.putExtra("com.android.phone.extra.slot", simSlot)
+                                intent.putExtra("slot", simSlot)
+                                intent.putExtra("Cdma_SimId", simSlot)
+
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                    try {
+                                        val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
+                                        if (telecomManager != null &&
+                                            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
+                                            val phoneAccounts = telecomManager.callCapablePhoneAccounts
+                                            for (account in phoneAccounts) {
+                                                if (account.id.contains(simSlot.toString())) {
+                                                    intent.putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, account)
+                                                    break
+                                                }
+                                            }
+                                        }
+                                    } catch (_: Exception) {}
+                                }
+                            }
+
+                            if (showHead && Settings.canDrawOverlays(this)) {
+                                FloatingCallHeadManager.show(applicationContext, name.ifBlank { cleanPhone }, cleanPhone)
+                            }
+
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("CALL_ERROR", e.message, null)
+                        }
+                    }
+                    "endCall" -> {
+                        try {
+                            val ended = FloatingCallHeadManager.endActiveCall(applicationContext)
+                            FloatingCallHeadManager.dismiss(applicationContext)
+                            result.success(ended)
+                        } catch (e: Exception) {
+                            result.error("END_CALL_ERROR", e.message, null)
+                        }
+                    }
+                    "showFloatingCallHead" -> {
+                        try {
+                            val name = call.argument<String>("name") ?: "Student Lead"
+                            val phone = call.argument<String>("phone") ?: ""
+                            FloatingCallHeadManager.show(applicationContext, name, phone)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("OVERLAY_ERROR", e.message, null)
+                        }
+                    }
+                    "dismissFloatingCallHead" -> {
+                        try {
+                            FloatingCallHeadManager.dismiss(applicationContext)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("DISMISS_ERROR", e.message, null)
                         }
                     }
                     else -> result.notImplemented()
@@ -474,6 +609,10 @@ class MainActivity : FlutterFragmentActivity() {
             val granted = checkHasPhonePermissions()
             pendingPhonePermissionResult?.success(granted)
             pendingPhonePermissionResult = null
+        } else if (requestCode == callPermissionRequestCode) {
+            val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+            pendingCallPermissionResult?.success(granted)
+            pendingCallPermissionResult = null
         }
     }
 

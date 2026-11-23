@@ -22,7 +22,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.22.1';
+const String kAppVersion = '1.23.0';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -774,6 +774,18 @@ abstract interface class AppSettingsStore {
   Future<bool> readAutoLogCallDuration();
 
   Future<void> saveAutoLogCallDuration(bool enabled);
+
+  Future<bool> readDirectCalling();
+
+  Future<void> saveDirectCalling(bool enabled);
+
+  Future<int> readPreferredSimSlot();
+
+  Future<void> savePreferredSimSlot(int slot);
+
+  Future<bool> readFloatingCallHead();
+
+  Future<void> saveFloatingCallHead(bool enabled);
 }
 
 class SecureAppSettingsStore implements AppSettingsStore {
@@ -794,6 +806,9 @@ class SecureAppSettingsStore implements AppSettingsStore {
   static const _companyDescriptionKey = 'student_call_company_description';
   static const _autoCheckUpdatesKey = 'student_call_auto_check_updates';
   static const _autoLogCallDurationKey = 'student_call_auto_log_call_duration';
+  static const _directCallingKey = 'student_call_direct_calling';
+  static const _preferredSimSlotKey = 'student_call_preferred_sim_slot';
+  static const _floatingCallHeadKey = 'student_call_floating_call_head';
   final FlutterSecureStorage _storage;
 
   @override
@@ -971,6 +986,36 @@ class SecureAppSettingsStore implements AppSettingsStore {
       _storage.write(key: _autoLogCallDurationKey, value: enabled.toString());
 
   @override
+  Future<bool> readDirectCalling() async {
+    final value = await _storage.read(key: _directCallingKey);
+    return value != 'false';
+  }
+
+  @override
+  Future<void> saveDirectCalling(bool enabled) =>
+      _storage.write(key: _directCallingKey, value: enabled.toString());
+
+  @override
+  Future<int> readPreferredSimSlot() async {
+    final value = await _storage.read(key: _preferredSimSlotKey);
+    return int.tryParse(value ?? '') ?? -1;
+  }
+
+  @override
+  Future<void> savePreferredSimSlot(int slot) =>
+      _storage.write(key: _preferredSimSlotKey, value: slot.toString());
+
+  @override
+  Future<bool> readFloatingCallHead() async {
+    final value = await _storage.read(key: _floatingCallHeadKey);
+    return value != 'false';
+  }
+
+  @override
+  Future<void> saveFloatingCallHead(bool enabled) =>
+      _storage.write(key: _floatingCallHeadKey, value: enabled.toString());
+
+  @override
   Future<void> saveSheetConfig(String url, {String name = ''}) async {
     final normalizedUrl = url.trim();
     final linkedSheets = await readLinkedSheets();
@@ -1119,6 +1164,9 @@ class MemoryAppSettingsStore implements AppSettingsStore {
 
   bool autoCheckUpdates = true;
   bool autoLogCallDuration = true;
+  bool directCalling = true;
+  int preferredSimSlot = -1;
+  bool floatingCallHead = true;
 
   @override
   Future<bool> readAutoCheckUpdates() async => autoCheckUpdates;
@@ -1134,6 +1182,30 @@ class MemoryAppSettingsStore implements AppSettingsStore {
   @override
   Future<void> saveAutoLogCallDuration(bool enabled) async {
     autoLogCallDuration = enabled;
+  }
+
+  @override
+  Future<bool> readDirectCalling() async => directCalling;
+
+  @override
+  Future<void> saveDirectCalling(bool enabled) async {
+    directCalling = enabled;
+  }
+
+  @override
+  Future<int> readPreferredSimSlot() async => preferredSimSlot;
+
+  @override
+  Future<void> savePreferredSimSlot(int slot) async {
+    preferredSimSlot = slot;
+  }
+
+  @override
+  Future<bool> readFloatingCallHead() async => floatingCallHead;
+
+  @override
+  Future<void> saveFloatingCallHead(bool enabled) async {
+    floatingCallHead = enabled;
   }
 }
 
@@ -1154,6 +1226,13 @@ String formatCallDuration(int seconds) {
   } else {
     return '$secs sec${secs > 1 ? 's' : ''}';
   }
+}
+
+String formatCallTimer(int seconds) {
+  if (seconds < 0) return '00:00';
+  final mins = seconds ~/ 60;
+  final secs = seconds % 60;
+  return '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
 }
 
 class CallerIdService {
@@ -1296,6 +1375,98 @@ class CallerIdService {
   static Future<void> dismissOverlay() async {
     try {
       await channel.invokeMethod('dismissOverlay');
+    } on MissingPluginException {
+      // In tests
+    } catch (_) {}
+  }
+
+  static Future<List<Map<String, dynamic>>> getSimSlots() async {
+    try {
+      final res = await channel.invokeListMethod<dynamic>('getSimSlots');
+      if (res == null) return [];
+      return res
+          .whereType<Map>()
+          .map((m) => m.map((k, v) => MapEntry(k.toString(), v)))
+          .toList();
+    } on MissingPluginException {
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<bool> hasCallPhonePermission() async {
+    try {
+      final res = await channel.invokeMethod<bool>('hasCallPhonePermission');
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> requestCallPhonePermission() async {
+    try {
+      final res =
+          await channel.invokeMethod<bool>('requestCallPhonePermission');
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> directCall({
+    required String phone,
+    int simSlot = -1,
+    String? name,
+    bool showFloatingHead = true,
+  }) async {
+    try {
+      final res = await channel.invokeMethod<bool>('directCall', {
+        'phone': phone,
+        'simSlot': simSlot,
+        'name': name,
+        'showFloatingHead': showFloatingHead,
+      });
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> endCall() async {
+    try {
+      final res = await channel.invokeMethod<bool>('endCall');
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> showFloatingCallHead({
+    required String name,
+    required String phone,
+  }) async {
+    try {
+      await channel.invokeMethod('showFloatingCallHead', {
+        'name': name,
+        'phone': phone,
+      });
+    } on MissingPluginException {
+      // In tests
+    } catch (_) {}
+  }
+
+  static Future<void> dismissFloatingCallHead() async {
+    try {
+      await channel.invokeMethod('dismissFloatingCallHead');
     } on MissingPluginException {
       // In tests
     } catch (_) {}
@@ -5392,6 +5563,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Student? _pendingCallStudent;
   DateTime? _callStartedAt;
+  Student? _activeInAppCallStudent;
+  DateTime? _activeInAppCallStartedAt;
+  Timer? _activeInAppCallTimer;
+  int _activeInAppCallDurationSec = 0;
+  Offset _activeCallPillPosition = const Offset(16, 70);
 
   @override
   void initState() {
@@ -5465,6 +5641,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _activeInAppCallTimer?.cancel();
     _offlineQueueRetryTimer?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -6576,7 +6753,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ],
       ),
       body: SafeArea(
-        child: Column(
+        child: Stack(
+          children: [
+            Column(
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(22, 4, 22, 18),
@@ -6764,7 +6943,93 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ],
         ),
-      ),
+        if (_activeInAppCallStudent != null)
+          Positioned(
+            left: _activeCallPillPosition.dx,
+            top: _activeCallPillPosition.dy,
+            child: GestureDetector(
+              onPanUpdate: (details) {
+                setState(() {
+                  _activeCallPillPosition += details.delta;
+                });
+              },
+              child: Material(
+                elevation: 10,
+                borderRadius: BorderRadius.circular(26),
+                color: const Color(0xFF131C24),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(14, 6, 8, 6),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(26),
+                    border: Border.all(
+                      color: const Color(0xFF354961),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF22C55E),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 130),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _activeInAppCallStudent!.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              formatCallTimer(_activeInAppCallDurationSec),
+                              style: const TextStyle(
+                                color: Color(0xFF62D6B0),
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      IconButton(
+                        key: const Key('end_call_button'),
+                        tooltip: 'End Call',
+                        icon: const Icon(
+                          Icons.call_end,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                        style: IconButton.styleFrom(
+                          backgroundColor: const Color(0xFFE65151),
+                          padding: const EdgeInsets.all(8),
+                        ),
+                        onPressed: _endActiveCall,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  ),
       bottomNavigationBar: _isSelectionMode
           ? Container(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
@@ -6844,8 +7109,213 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  void _startActiveCallTimer() {
+    _activeInAppCallTimer?.cancel();
+    _activeInAppCallDurationSec = 0;
+    _activeInAppCallTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || _activeInAppCallStartedAt == null) {
+        timer.cancel();
+        return;
+      }
+      setState(() {
+        _activeInAppCallDurationSec =
+            DateTime.now().difference(_activeInAppCallStartedAt!).inSeconds;
+      });
+    });
+  }
+
+  void _stopActiveCallTimer() {
+    _activeInAppCallTimer?.cancel();
+    _activeInAppCallTimer = null;
+  }
+
+  Future<void> _endActiveCall() async {
+    final student = _activeInAppCallStudent ?? _pendingCallStudent;
+    final duration = _activeInAppCallDurationSec > 0
+        ? _activeInAppCallDurationSec
+        : (_activeInAppCallStartedAt != null
+            ? DateTime.now().difference(_activeInAppCallStartedAt!).inSeconds
+            : 0);
+
+    _stopActiveCallTimer();
+    setState(() {
+      _activeInAppCallStudent = null;
+      _activeInAppCallStartedAt = null;
+      _pendingCallStudent = null;
+      _callStartedAt = null;
+    });
+
+    try {
+      await CallerIdService.endCall();
+    } catch (_) {}
+    try {
+      await CallerIdService.dismissFloatingCallHead();
+    } catch (_) {}
+
+    if (student != null) {
+      await _logCallDurationForStudent(student, duration);
+    }
+  }
+
+  Future<int?> _showSimChoiceSheet(
+    Student student,
+    List<Map<String, dynamic>> slots,
+  ) async {
+    bool remember = false;
+    return showModalBottomSheet<int>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final theme = Theme.of(context);
+            return SafeArea(
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.onSurfaceVariant
+                              .withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        const Icon(Icons.sim_card_outlined,
+                            color: _green, size: 24),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Choose SIM for Call',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Calling ${student.name} (${student.phone})',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ...slots.map((slot) {
+                      final idx = (slot['slotIndex'] as num?)?.toInt() ?? 0;
+                      final carrier = slot['carrierName']?.toString() ?? '';
+                      final display =
+                          slot['displayName']?.toString() ?? 'SIM ${idx + 1}';
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            side: BorderSide(
+                                color: theme.colorScheme.outlineVariant),
+                          ),
+                          leading: CircleAvatar(
+                            backgroundColor: _green.withValues(alpha: 0.15),
+                            foregroundColor: _green,
+                            child: Text('${idx + 1}',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                          title: Text(
+                            display,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: carrier.isNotEmpty ? Text(carrier) : null,
+                          trailing: const Icon(Icons.call_outlined,
+                              color: _green),
+                          onTap: () async {
+                            if (remember) {
+                              await _settingsStore.savePreferredSimSlot(idx);
+                            }
+                            if (ctx.mounted) Navigator.of(ctx).pop(idx);
+                          },
+                        ),
+                      );
+                    }),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: remember,
+                      title: const Text('Always use this SIM for calls'),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      onChanged: (val) {
+                        setSheetState(() => remember = val ?? false);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _callStudent(Student student) async {
     try {
+      final directCalling = await _settingsStore.readDirectCalling();
+      if (directCalling) {
+        var hasPermission = await CallerIdService.hasCallPhonePermission();
+        if (!hasPermission) {
+          hasPermission = await CallerIdService.requestCallPhonePermission();
+        }
+
+        if (hasPermission) {
+          int preferredSlot = await _settingsStore.readPreferredSimSlot();
+          if (preferredSlot == -1) {
+            final simSlots = await CallerIdService.getSimSlots();
+            if (simSlots.length > 1 && mounted) {
+              final chosen = await _showSimChoiceSheet(student, simSlots);
+              if (chosen == null) return;
+              preferredSlot = chosen;
+            }
+          }
+
+          final floatingHead = await _settingsStore.readFloatingCallHead();
+          _pendingCallStudent = student;
+          _callStartedAt = DateTime.now();
+
+          setState(() {
+            _activeInAppCallStudent = student;
+            _activeInAppCallStartedAt = DateTime.now();
+          });
+          _startActiveCallTimer();
+
+          final success = await CallerIdService.directCall(
+            phone: student.phone,
+            simSlot: preferredSlot,
+            name: student.name,
+            showFloatingHead: floatingHead,
+          );
+
+          if (!success && mounted) {
+            final launched = await launchUrl(Uri.parse('tel:${student.phone}'));
+            if (!launched && mounted) {
+              _showMessage('Could not initiate call for ${student.name}.');
+            }
+          }
+          return;
+        }
+      }
+
       _pendingCallStudent = student;
       _callStartedAt = DateTime.now();
       final launched = await launchUrl(Uri.parse('tel:${student.phone}'));
@@ -6858,6 +7328,37 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _checkAndLogCallDuration() async {
+    // 0. Check active in-app call
+    if (_activeInAppCallStudent != null) {
+      _stopActiveCallTimer();
+      final student = _activeInAppCallStudent!;
+      final startedAt = _callStartedAt;
+      setState(() {
+        _activeInAppCallStudent = null;
+        _activeInAppCallStartedAt = null;
+        _pendingCallStudent = null;
+        _callStartedAt = null;
+      });
+
+      final elapsedSec = startedAt != null
+          ? DateTime.now().difference(startedAt).inSeconds
+          : _activeInAppCallDurationSec;
+      if (elapsedSec >= 2) {
+        await Future<void>.delayed(const Duration(milliseconds: 1000));
+        if (!mounted) return;
+        int durationSec = elapsedSec;
+        try {
+          final log =
+              await CallerIdService.getLatestCallLog(phone: student.phone);
+          if (log != null && log['duration'] is num) {
+            durationSec = (log['duration'] as num).toInt();
+          }
+        } catch (_) {}
+        await _logCallDurationForStudent(student, durationSec);
+      }
+      return;
+    }
+
     // 1. Check if an in-app call was placed to a student
     if (_pendingCallStudent != null && _callStartedAt != null) {
       final student = _pendingCallStudent!;
@@ -10218,6 +10719,10 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
   bool _hasPhonePermissions = false;
   bool _isIgnoringBattery = true;
   bool _autoLogCallDuration = true;
+  bool _directCalling = true;
+  int _preferredSimSlot = -1;
+  bool _floatingCallHead = true;
+  List<Map<String, dynamic>> _detectedSimSlots = [];
   int _cachedCount = 0;
   String _geminiApiKey = '';
   bool _autoCheckUpdates = true;
@@ -10284,6 +10789,13 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
         await CallerIdService.isIgnoringBatteryOptimizations();
     final autoLog =
         await widget.settingsStore?.readAutoLogCallDuration() ?? true;
+    final directCalling =
+        await widget.settingsStore?.readDirectCalling() ?? true;
+    final preferredSimSlot =
+        await widget.settingsStore?.readPreferredSimSlot() ?? -1;
+    final floatingCallHead =
+        await widget.settingsStore?.readFloatingCallHead() ?? true;
+    final sims = await CallerIdService.getSimSlots();
     var count = await CallerIdService.getCachedCount();
     if (count == 0 && widget.students.isNotEmpty) {
       await CallerIdService.syncStudents(widget.students);
@@ -10296,9 +10808,81 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
         _hasPhonePermissions = hasPhone;
         _isIgnoringBattery = isIgnoringBattery;
         _autoLogCallDuration = autoLog;
+        _directCalling = directCalling;
+        _preferredSimSlot = preferredSimSlot;
+        _floatingCallHead = floatingCallHead;
+        _detectedSimSlots = sims;
         _cachedCount = count > 0 ? count : widget.students.length;
       });
     }
+  }
+
+  Future<void> _showDefaultSimDialog() async {
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Default Calling SIM'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(ctx).pop(-1),
+            child: Row(
+              children: [
+                Icon(
+                  _preferredSimSlot == -1
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
+                  color: _green,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                const Text('Always Ask / System Default'),
+              ],
+            ),
+          ),
+          ..._detectedSimSlots.map((slot) {
+            final idx = (slot['slotIndex'] as num?)?.toInt() ?? 0;
+            final carrier = slot['carrierName']?.toString() ?? '';
+            final display =
+                slot['displayName']?.toString() ?? 'SIM ${idx + 1}';
+            final isSelected = _preferredSimSlot == idx;
+            return SimpleDialogOption(
+              onPressed: () => Navigator.of(ctx).pop(idx),
+              child: Row(
+                children: [
+                  Icon(
+                    isSelected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: _green,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(carrier.isNotEmpty ? '$display ($carrier)' : display),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+
+    if (selected != null) {
+      setState(() => _preferredSimSlot = selected);
+      await widget.settingsStore?.savePreferredSimSlot(selected);
+    }
+  }
+
+  String _getSimSlotSubtitle() {
+    if (_preferredSimSlot == -1) return 'Always Ask / System Default';
+    final match = _detectedSimSlots.firstWhere(
+      (s) => s['slotIndex'] == _preferredSimSlot,
+      orElse: () => {},
+    );
+    if (match.isEmpty) return 'SIM ${_preferredSimSlot + 1}';
+    final carrier = match['carrierName']?.toString() ?? '';
+    final display =
+        match['displayName']?.toString() ?? 'SIM ${_preferredSimSlot + 1}';
+    return carrier.isNotEmpty ? '$display ($carrier)' : display;
   }
 
   Future<void> _requestPermissions() async {
@@ -10803,6 +11387,76 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
                               ?.saveAutoLogCallDuration(val);
                         },
                       ),
+                      Divider(
+                        height: 1,
+                        indent: 56,
+                        color: theme.colorScheme.outlineVariant,
+                      ),
+                      SwitchListTile(
+                        secondary: const Icon(Icons.phone_forwarded_rounded),
+                        title: const Text('Direct In-App Calling'),
+                        subtitle: const Text(
+                          'Call directly without opening dialpad • Keep LeadPilot in front',
+                        ),
+                        value: _directCalling,
+                        onChanged: (val) async {
+                          setState(() => _directCalling = val);
+                          await widget.settingsStore?.saveDirectCalling(val);
+                        },
+                      ),
+                      if (_detectedSimSlots.isNotEmpty) ...[
+                        Divider(
+                          height: 1,
+                          indent: 56,
+                          color: theme.colorScheme.outlineVariant,
+                        ),
+                        ListTile(
+                          leading: const Icon(Icons.sim_card_outlined),
+                          title: const Text('Default Calling SIM'),
+                          subtitle: Text(_getSimSlotSubtitle()),
+                          trailing: const Icon(Icons.chevron_right_rounded),
+                          onTap: _showDefaultSimDialog,
+                        ),
+                      ],
+                      Divider(
+                        height: 1,
+                        indent: 56,
+                        color: theme.colorScheme.outlineVariant,
+                      ),
+                      SwitchListTile(
+                        secondary:
+                            const Icon(Icons.chat_bubble_outline_rounded),
+                        title: const Text('Floating Call Head & Live Timer'),
+                        subtitle: const Text(
+                          'Show floating chat-head with live timer & 1-tap End Call button',
+                        ),
+                        value: _floatingCallHead,
+                        onChanged: (val) async {
+                          setState(() => _floatingCallHead = val);
+                          await widget.settingsStore
+                              ?.saveFloatingCallHead(val);
+                        },
+                      ),
+                      if (_floatingCallHead) ...[
+                        Divider(
+                          height: 1,
+                          indent: 56,
+                          color: theme.colorScheme.outlineVariant,
+                        ),
+                        ListTile(
+                          leading: const Icon(Icons.preview_rounded),
+                          title: const Text('Preview Floating Call Head'),
+                          subtitle: const Text(
+                            'Display sample chat-head with live timer & End Call button',
+                          ),
+                          onTap: () async {
+                            await CallerIdService.showFloatingCallHead(
+                              name: 'Kamal Perera',
+                              phone: '077 123 4567',
+                            );
+                          },
+                        ),
+                      ],
                       Divider(
                         height: 1,
                         indent: 56,

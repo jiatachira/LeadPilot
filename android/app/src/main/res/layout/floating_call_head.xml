@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/call_head_root"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/floating_call_head_bg"
+    android:paddingStart="14dp"
+    android:paddingTop="8dp"
+    android:paddingEnd="8dp"
+    android:paddingBottom="8dp"
+    android:elevation="8dp">
+
+    <!-- Active Call Dot -->
+    <View
+        android:id="@+id/call_head_dot"
+        android:layout_width="10dp"
+        android:layout_height="10dp"
+        android:background="@drawable/call_head_pulse_dot" />
+
+    <!-- Info Column (Student Name + Duration) -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="14dp">
+
+        <TextView
+            android:id="@+id/call_head_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxWidth="130dp"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:text="Student"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/call_head_timer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="00:00"
+            android:textColor="#62D6B0"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace" />
+    </LinearLayout>
+
+    <!-- End Call Button (Red Circle) -->
+    <ImageButton
+        android:id="@+id/call_head_btn_end"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:background="@drawable/btn_call_end_circle"
+        android:src="@drawable/ic_call_end_vector"
+        android:scaleType="centerInside"
+        android:contentDescription="End Call" />
+
+</LinearLayout>
