@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:http/http.dart' as http;
@@ -21,7 +22,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.18.2';
+const String kAppVersion = '1.19.0';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -553,26 +554,53 @@ class LinkedSheet {
   }
 }
 
+class WhatsAppSendPayload {
+  const WhatsAppSendPayload({
+    required this.message,
+    this.documentPaths = const [],
+  });
+
+  final String message;
+  final List<String> documentPaths;
+
+  bool get hasDocuments => documentPaths.any((p) => p.trim().isNotEmpty);
+}
+
 class WhatsAppTemplate {
   const WhatsAppTemplate({
     required this.id,
     required this.name,
     required this.message,
+    this.documentPath,
+    this.documentName,
   });
 
   final String id;
   final String name;
   final String message;
+  final String? documentPath;
+  final String? documentName;
+
+  bool get hasDocument =>
+      documentPath != null &&
+      documentPath!.trim().isNotEmpty &&
+      documentName != null &&
+      documentName!.trim().isNotEmpty;
 
   WhatsAppTemplate copyWith({
     String? id,
     String? name,
     String? message,
+    String? documentPath,
+    String? documentName,
+    bool clearDocument = false,
   }) {
     return WhatsAppTemplate(
       id: id ?? this.id,
       name: name ?? this.name,
       message: message ?? this.message,
+      documentPath: clearDocument ? null : (documentPath ?? this.documentPath),
+      documentName: clearDocument ? null : (documentName ?? this.documentName),
     );
   }
 
@@ -580,6 +608,8 @@ class WhatsAppTemplate {
     'id': id,
     'name': name,
     'message': message,
+    if (documentPath != null) 'documentPath': documentPath,
+    if (documentName != null) 'documentName': documentName,
   };
 
   factory WhatsAppTemplate.fromJson(Map<String, dynamic> json) {
@@ -588,6 +618,8 @@ class WhatsAppTemplate {
           DateTime.now().millisecondsSinceEpoch.toString(),
       name: (json['name'] as String?) ?? '',
       message: (json['message'] as String?) ?? '',
+      documentPath: json['documentPath'] as String?,
+      documentName: json['documentName'] as String?,
     );
   }
 
@@ -6633,11 +6665,12 @@ class _HomeScreenState extends State<HomeScreen> {
     } else if (choice == _MessageChoice.template) {
       final templates = await _settingsStore.readWhatsAppTemplates();
       if (!mounted) return;
-      final selectedMessage = await showModalBottomSheet<String>(
+      final selectedPayload =
+          await showModalBottomSheet<WhatsAppSendPayload>(
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
-        builder: (_) => _WhatsAppTemplatePickerSheet(
+        builder: (_) => WhatsAppTemplatePickerSheet(
           student: student,
           templates: templates,
           isSms: false,
@@ -6647,8 +6680,12 @@ class _HomeScreenState extends State<HomeScreen> {
           },
         ),
       );
-      if (selectedMessage != null && mounted) {
-        await _launchWhatsApp(number, text: selectedMessage);
+      if (selectedPayload != null && mounted) {
+        await _dispatchWhatsAppMessage(
+          student: student,
+          text: selectedPayload.message,
+          documentPaths: selectedPayload.documentPaths,
+        );
       }
     } else if (choice == _MessageChoice.ai) {
       final apiKey = await _settingsStore.readGeminiApiKey();
@@ -6669,6 +6706,38 @@ class _HomeScreenState extends State<HomeScreen> {
           mounted) {
         await _launchWhatsApp(number, text: selectedMessage.trim());
       }
+    }
+  }
+
+  Future<void> _dispatchWhatsAppMessage({
+    required Student student,
+    required String text,
+    List<String> documentPaths = const [],
+  }) async {
+    final number = student.whatsappNumber.trim().isEmpty
+        ? student.phone
+        : student.whatsappNumber;
+    final validDocuments = documentPaths
+        .where((path) => path.trim().isNotEmpty && File(path).existsSync())
+        .toList();
+
+    if (validDocuments.isNotEmpty) {
+      try {
+        final xFiles = validDocuments.map((path) => XFile(path)).toList();
+        await SharePlus.instance.share(
+          ShareParams(
+            files: xFiles,
+            text: text,
+            subject: 'Document for ${student.name}',
+          ),
+        );
+      } on Exception catch (error) {
+        if (mounted) {
+          _showMessage('Could not share documents: $error');
+        }
+      }
+    } else {
+      await _launchWhatsApp(number, text: text);
     }
   }
 
@@ -6708,11 +6777,12 @@ class _HomeScreenState extends State<HomeScreen> {
     } else if (choice == _MessageChoice.template) {
       final templates = await _settingsStore.readWhatsAppTemplates();
       if (!mounted) return;
-      final selectedMessage = await showModalBottomSheet<String>(
+      final selectedPayload =
+          await showModalBottomSheet<WhatsAppSendPayload>(
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
-        builder: (_) => _WhatsAppTemplatePickerSheet(
+        builder: (_) => WhatsAppTemplatePickerSheet(
           student: student,
           templates: templates,
           isSms: true,
@@ -6722,8 +6792,8 @@ class _HomeScreenState extends State<HomeScreen> {
           },
         ),
       );
-      if (selectedMessage != null && mounted) {
-        await _launchSms(number, text: selectedMessage);
+      if (selectedPayload != null && mounted) {
+        await _launchSms(number, text: selectedPayload.message);
       }
     } else if (choice == _MessageChoice.ai) {
       final apiKey = await _settingsStore.readGeminiApiKey();
@@ -10746,8 +10816,9 @@ class MessageChoiceSheet extends StatelessWidget {
   }
 }
 
-class _WhatsAppTemplatePickerSheet extends StatelessWidget {
-  const _WhatsAppTemplatePickerSheet({
+class WhatsAppTemplatePickerSheet extends StatefulWidget {
+  const WhatsAppTemplatePickerSheet({
+    super.key,
     required this.student,
     required this.templates,
     required this.onManageTemplates,
@@ -10759,11 +10830,68 @@ class _WhatsAppTemplatePickerSheet extends StatelessWidget {
   final VoidCallback onManageTemplates;
   final bool isSms;
 
+  @override
+  State<WhatsAppTemplatePickerSheet> createState() =>
+      _WhatsAppTemplatePickerSheetState();
+}
+
+class _WhatsAppTemplatePickerSheetState
+    extends State<WhatsAppTemplatePickerSheet> {
+  bool _isMultiSelect = false;
+  final Set<String> _selectedTemplateIds = <String>{};
+
   String _formatMessage(String template) {
-    final studentName = student.name.trim();
+    final studentName = widget.student.name.trim();
     return template.replaceAll(
       '{name}',
       studentName.isNotEmpty ? studentName : 'there',
+    );
+  }
+
+  void _sendSingle(WhatsAppTemplate item) {
+    final preview = _formatMessage(item.message);
+    final docs =
+        (item.hasDocument && !widget.isSms && item.documentPath != null)
+            ? [item.documentPath!]
+            : <String>[];
+    Navigator.pop(
+      context,
+      WhatsAppSendPayload(
+        message: preview,
+        documentPaths: docs,
+      ),
+    );
+  }
+
+  void _sendMulti() {
+    if (_selectedTemplateIds.isEmpty) return;
+
+    final selected = widget.templates
+        .where((t) => _selectedTemplateIds.contains(t.id))
+        .toList();
+    if (selected.isEmpty) return;
+
+    final combinedMessage =
+        selected.map((t) => _formatMessage(t.message)).join('\n\n');
+
+    final docs = <String>[];
+    if (!widget.isSms) {
+      for (final t in selected) {
+        if (t.hasDocument && t.documentPath != null) {
+          final p = t.documentPath!;
+          if (!docs.contains(p)) {
+            docs.add(p);
+          }
+        }
+      }
+    }
+
+    Navigator.pop(
+      context,
+      WhatsAppSendPayload(
+        message: combinedMessage,
+        documentPaths: docs,
+      ),
     );
   }
 
@@ -10772,15 +10900,25 @@ class _WhatsAppTemplatePickerSheet extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
+    final selectedCount = _selectedTemplateIds.length;
+    final selectedDocsCount = widget.isSms
+        ? 0
+        : widget.templates
+            .where((t) =>
+                _selectedTemplateIds.contains(t.id) &&
+                t.hasDocument &&
+                t.documentPath != null)
+            .length;
+
     return Container(
       constraints: BoxConstraints(
-        maxHeight: MediaQuery.sizeOf(context).height * 0.75,
+        maxHeight: MediaQuery.sizeOf(context).height * 0.8,
       ),
       padding: EdgeInsets.fromLTRB(
         22,
         12,
         22,
-        MediaQuery.viewInsetsOf(context).bottom + 24,
+        MediaQuery.viewInsetsOf(context).bottom + 20,
       ),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
@@ -10811,17 +10949,45 @@ class _WhatsAppTemplatePickerSheet extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Select Template',
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              'Select Template',
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          if (_isMultiSelect && selectedCount > 0) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.primaryContainer,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '$selectedCount selected',
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: theme.colorScheme.onPrimaryContainer,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        isSms
-                            ? 'Tap a template to send via SMS to ${student.name}'
-                            : 'Tap a template to send to ${student.name}',
+                        _isMultiSelect
+                            ? 'Check templates to combine and send together'
+                            : (widget.isSms
+                                ? 'Tap a template to send via SMS'
+                                : 'Tap a template to send, or choose multi-select'),
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -10829,15 +10995,51 @@ class _WhatsAppTemplatePickerSheet extends StatelessWidget {
                     ],
                   ),
                 ),
-                TextButton.icon(
-                  onPressed: onManageTemplates,
-                  icon: const Icon(Icons.settings_outlined, size: 18),
-                  label: const Text('Manage'),
+                FilterChip(
+                  selected: _isMultiSelect,
+                  showCheckmark: false,
+                  avatar: Icon(
+                    _isMultiSelect
+                        ? Icons.checklist_rtl_rounded
+                        : Icons.checklist_rounded,
+                    size: 16,
+                    color: _isMultiSelect
+                        ? theme.colorScheme.onPrimary
+                        : theme.colorScheme.primary,
+                  ),
+                  label: Text(
+                    _isMultiSelect ? 'Done' : 'Multi-Select',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: _isMultiSelect
+                          ? theme.colorScheme.onPrimary
+                          : theme.colorScheme.primary,
+                    ),
+                  ),
+                  selectedColor: theme.colorScheme.primary,
+                  backgroundColor:
+                      theme.colorScheme.primaryContainer.withValues(alpha: 0.35),
+                  side: BorderSide(
+                    color: theme.colorScheme.primary.withValues(alpha: 0.3),
+                  ),
+                  onSelected: (val) {
+                    setState(() {
+                      _isMultiSelect = val;
+                      if (!val) _selectedTemplateIds.clear();
+                    });
+                  },
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  onPressed: widget.onManageTemplates,
+                  icon: const Icon(Icons.settings_outlined, size: 20),
+                  tooltip: 'Manage Templates',
                 ),
               ],
             ),
             const SizedBox(height: 14),
-            if (templates.isEmpty)
+            if (widget.templates.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 24),
                 child: Column(
@@ -10854,7 +11056,7 @@ class _WhatsAppTemplatePickerSheet extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     FilledButton.tonalIcon(
-                      onPressed: onManageTemplates,
+                      onPressed: widget.onManageTemplates,
                       icon: const Icon(Icons.add),
                       label: const Text('Create Template'),
                     ),
@@ -10865,18 +11067,47 @@ class _WhatsAppTemplatePickerSheet extends StatelessWidget {
               Flexible(
                 child: ListView.separated(
                   shrinkWrap: true,
-                  itemCount: templates.length,
+                  itemCount: widget.templates.length,
                   separatorBuilder: (context, index) =>
                       const SizedBox(height: 10),
                   itemBuilder: (context, index) {
-                    final item = templates[index];
+                    final item = widget.templates[index];
                     final preview = _formatMessage(item.message);
+                    final isSelected = _selectedTemplateIds.contains(item.id);
+
                     return Card(
-                      color: theme.colorScheme.surfaceContainerLow,
+                      color: isSelected
+                          ? theme.colorScheme.primaryContainer
+                              .withValues(alpha: 0.35)
+                          : theme.colorScheme.surfaceContainerLow,
                       margin: EdgeInsets.zero,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        side: isSelected
+                            ? BorderSide(
+                                color: theme.colorScheme.primary,
+                                width: 1.5,
+                              )
+                            : BorderSide(
+                                color: theme.colorScheme.outlineVariant
+                                    .withValues(alpha: 0.3),
+                              ),
+                      ),
                       child: InkWell(
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: () => Navigator.pop(context, preview),
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () {
+                          if (_isMultiSelect) {
+                            setState(() {
+                              if (isSelected) {
+                                _selectedTemplateIds.remove(item.id);
+                              } else {
+                                _selectedTemplateIds.add(item.id);
+                              }
+                            });
+                          } else {
+                            _sendSingle(item);
+                          }
+                        },
                         child: Padding(
                           padding: const EdgeInsets.all(14),
                           child: Column(
@@ -10884,16 +11115,35 @@ class _WhatsAppTemplatePickerSheet extends StatelessWidget {
                             children: [
                               Row(
                                 children: [
-                                  Icon(
-                                    isSms
-                                        ? Icons.sms_outlined
-                                        : Icons.chat_bubble_outline,
-                                    size: 18,
-                                    color: isSms
-                                        ? const Color(0xFF2E6FA3)
-                                        : theme.colorScheme.primary,
-                                  ),
-                                  const SizedBox(width: 8),
+                                  if (_isMultiSelect) ...[
+                                    Checkbox(
+                                      value: isSelected,
+                                      visualDensity: VisualDensity.compact,
+                                      materialTapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                      onChanged: (val) {
+                                        setState(() {
+                                          if (val == true) {
+                                            _selectedTemplateIds.add(item.id);
+                                          } else {
+                                            _selectedTemplateIds.remove(item.id);
+                                          }
+                                        });
+                                      },
+                                    ),
+                                    const SizedBox(width: 6),
+                                  ] else ...[
+                                    Icon(
+                                      widget.isSms
+                                          ? Icons.sms_outlined
+                                          : Icons.chat_bubble_outline,
+                                      size: 18,
+                                      color: widget.isSms
+                                          ? const Color(0xFF2E6FA3)
+                                          : theme.colorScheme.primary,
+                                    ),
+                                    const SizedBox(width: 8),
+                                  ],
                                   Expanded(
                                     child: Text(
                                       item.name,
@@ -10903,11 +11153,12 @@ class _WhatsAppTemplatePickerSheet extends StatelessWidget {
                                       ),
                                     ),
                                   ),
-                                  Icon(
-                                    Icons.send_rounded,
-                                    size: 16,
-                                    color: theme.colorScheme.primary,
-                                  ),
+                                  if (!_isMultiSelect)
+                                    Icon(
+                                      Icons.send_rounded,
+                                      size: 16,
+                                      color: theme.colorScheme.primary,
+                                    ),
                                 ],
                               ),
                               const SizedBox(height: 8),
@@ -10919,6 +11170,47 @@ class _WhatsAppTemplatePickerSheet extends StatelessWidget {
                                 maxLines: 3,
                                 overflow: TextOverflow.ellipsis,
                               ),
+                              if (item.hasDocument && !widget.isSms) ...[
+                                const SizedBox(height: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: theme.colorScheme.primaryContainer
+                                        .withValues(alpha: 0.5),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: theme.colorScheme.primary
+                                          .withValues(alpha: 0.3),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.attach_file,
+                                        size: 14,
+                                        color: theme.colorScheme.primary,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Flexible(
+                                        child: Text(
+                                          item.documentName ?? 'Attached document',
+                                          style: theme.textTheme.labelSmall
+                                              ?.copyWith(
+                                            color: theme.colorScheme.primary,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -10927,6 +11219,24 @@ class _WhatsAppTemplatePickerSheet extends StatelessWidget {
                   },
                 ),
               ),
+            if (_isMultiSelect) ...[
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: _selectedTemplateIds.isEmpty ? null : _sendMulti,
+                icon: const Icon(Icons.send_rounded, size: 18),
+                label: Text(
+                  _selectedTemplateIds.isEmpty
+                      ? 'Select templates to send'
+                      : 'Send $selectedCount Template${selectedCount > 1 ? "s" : ""}${selectedDocsCount > 0 ? " ($selectedDocsCount with docs)" : ""}',
+                ),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -10953,6 +11263,8 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _messageController;
+  String? _documentPath;
+  String? _documentName;
 
   @override
   void initState() {
@@ -10963,6 +11275,8 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
     _messageController = TextEditingController(
       text: widget.template?.message ?? widget.initialMessage ?? '',
     );
+    _documentPath = widget.template?.documentPath;
+    _documentName = widget.template?.documentName;
   }
 
   @override
@@ -10972,8 +11286,44 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
     super.dispose();
   }
 
+  Future<void> _pickDocument() async {
+    try {
+      final file = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: [
+          'pdf',
+          'doc',
+          'docx',
+          'xls',
+          'xlsx',
+          'ppt',
+          'pptx',
+          'txt',
+          'png',
+          'jpg',
+          'jpeg',
+        ],
+      );
+      if (file != null && file.path != null && file.path!.trim().isNotEmpty) {
+        setState(() {
+          _documentPath = file.path;
+          _documentName = file.name;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error picking file: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not attach file: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return AlertDialog(
       title: Text(
         widget.template != null
@@ -11023,6 +11373,108 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
                   return null;
                 },
               ),
+              const SizedBox(height: 14),
+              // Document attachment section for WhatsApp templates
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest
+                      .withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: theme.colorScheme.outlineVariant
+                        .withValues(alpha: 0.5),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.attach_file,
+                          size: 18,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Attach Document (WhatsApp)',
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Attach a PDF or file to send along with this template on WhatsApp.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontSize: 11,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    if (_documentPath != null && _documentName != null) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primaryContainer
+                              .withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: theme.colorScheme.primary
+                                .withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.description,
+                              size: 20,
+                              color: theme.colorScheme.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _documentName!,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close, size: 18),
+                              tooltip: 'Remove document',
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: () {
+                                setState(() {
+                                  _documentPath = null;
+                                  _documentName = null;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ] else ...[
+                      OutlinedButton.icon(
+                        onPressed: _pickDocument,
+                        icon: const Icon(Icons.upload_file, size: 18),
+                        label: const Text('Attach Document (PDF, Doc)'),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -11040,6 +11492,8 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
                     DateTime.now().millisecondsSinceEpoch.toString(),
                 name: _nameController.text.trim(),
                 message: _messageController.text.trim(),
+                documentPath: _documentPath,
+                documentName: _documentName,
               );
               Navigator.pop(context, result);
             }
@@ -11270,12 +11724,63 @@ class _ManageWhatsAppTemplatesSheetState
                             Row(
                               children: [
                                 Expanded(
-                                  child: Text(
-                                    item.name,
-                                    style:
-                                        theme.textTheme.titleMedium?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                    ),
+                                  child: Row(
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          item.name,
+                                          style: theme.textTheme.titleMedium
+                                              ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                      if (item.hasDocument) ...[
+                                        const SizedBox(width: 8),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: theme
+                                                .colorScheme.primaryContainer,
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                Icons.attach_file,
+                                                size: 13,
+                                                color: theme.colorScheme
+                                                    .onPrimaryContainer,
+                                              ),
+                                              const SizedBox(width: 3),
+                                              ConstrainedBox(
+                                                constraints:
+                                                    const BoxConstraints(
+                                                  maxWidth: 130,
+                                                ),
+                                                child: Text(
+                                                  item.documentName ?? 'Doc',
+                                                  style: theme
+                                                      .textTheme.labelSmall
+                                                      ?.copyWith(
+                                                    color: theme.colorScheme
+                                                        .onPrimaryContainer,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ],
                                   ),
                                 ),
                                 IconButton(
@@ -11304,6 +11809,31 @@ class _ManageWhatsAppTemplatesSheetState
                                 color: theme.colorScheme.onSurfaceVariant,
                               ),
                             ),
+                            if (item.hasDocument) ...[
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.description_outlined,
+                                    size: 14,
+                                    color: theme.colorScheme.primary,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      'File: ${item.documentName}',
+                                      style:
+                                          theme.textTheme.bodySmall?.copyWith(
+                                        color: theme.colorScheme.primary,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ],
                         ),
                       ),

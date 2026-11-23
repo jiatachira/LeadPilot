@@ -2308,7 +2308,7 @@ void main() {
     expect(find.text('Caller ID'), findsOneWidget);
     expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
     expect(testPopupFinder, findsOneWidget);
-    expect(find.text('LeadPilot v1.18.2'), findsOneWidget);
+    expect(find.text('LeadPilot v1.19.0'), findsOneWidget);
 
     await tester.tap(testPopupFinder);
     await tester.pumpAndSettle();
@@ -3534,7 +3534,7 @@ void main() {
     await tester.tap(checkBtn);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
-    expect(find.text('LeadPilot is up to date (v1.18.2).'), findsOneWidget);
+    expect(find.text('LeadPilot is up to date (v1.19.0).'), findsOneWidget);
 
     // Toggle Auto-check
     final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
@@ -3668,5 +3668,134 @@ void main() {
 
     expect(find.text('2 past interaction(s) analyzed by AI'), findsOneWidget);
     expect(find.textContaining('Requested brochure'), findsOneWidget);
+  });
+
+  test('WhatsAppTemplate supports document attachments and JSON serialization',
+      () {
+    const templateWithDoc = WhatsAppTemplate(
+      id: 'doc_1',
+      name: 'Brochure Template',
+      message: 'Hello {name}, find attached the syllabus.',
+      documentPath: '/storage/syllabus.pdf',
+      documentName: 'syllabus.pdf',
+    );
+
+    expect(templateWithDoc.hasDocument, isTrue);
+    expect(templateWithDoc.documentPath, '/storage/syllabus.pdf');
+    expect(templateWithDoc.documentName, 'syllabus.pdf');
+
+    final json = templateWithDoc.toJson();
+    expect(json['documentPath'], '/storage/syllabus.pdf');
+    expect(json['documentName'], 'syllabus.pdf');
+
+    final fromJson = WhatsAppTemplate.fromJson(json);
+    expect(fromJson.hasDocument, isTrue);
+    expect(fromJson.name, 'Brochure Template');
+    expect(fromJson.documentPath, '/storage/syllabus.pdf');
+    expect(fromJson.documentName, 'syllabus.pdf');
+
+    final cleared = templateWithDoc.copyWith(clearDocument: true);
+    expect(cleared.hasDocument, isFalse);
+    expect(cleared.documentPath, isNull);
+    expect(cleared.documentName, isNull);
+  });
+
+  test('WhatsAppSendPayload handles text and multiple documents correctly', () {
+    const payload = WhatsAppSendPayload(
+      message: 'Hello Student',
+      documentPaths: ['/path/to/doc1.pdf', '/path/to/doc2.pdf'],
+    );
+    expect(payload.hasDocuments, isTrue);
+    expect(payload.documentPaths.length, 2);
+
+    const textOnly = WhatsAppSendPayload(message: 'Just text');
+    expect(textOnly.hasDocuments, isFalse);
+    expect(textOnly.documentPaths, isEmpty);
+  });
+
+  testWidgets(
+      'WhatsApp Template picker allows multi-selecting and combining templates with documents',
+      (tester) async {
+    final student = Student(
+      name: 'Nimal Perera',
+      phone: '0771234567',
+    );
+
+    final templates = [
+      const WhatsAppTemplate(
+        id: 't1',
+        name: 'Greeting',
+        message: 'Hello {name}, welcome to our institute!',
+      ),
+      const WhatsAppTemplate(
+        id: 't2',
+        name: 'Curriculum PDF',
+        message: 'Here is the course syllabus.',
+        documentPath: '/mock/syllabus.pdf',
+        documentName: 'syllabus.pdf',
+      ),
+    ];
+
+    WhatsAppSendPayload? dispatchedResult;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (ctx) => ElevatedButton(
+              onPressed: () async {
+                dispatchedResult =
+                    await showModalBottomSheet<WhatsAppSendPayload>(
+                  context: ctx,
+                  isScrollControlled: true,
+                  builder: (_) => WhatsAppTemplatePickerSheet(
+                    student: student,
+                    templates: templates,
+                    onManageTemplates: () {},
+                  ),
+                );
+              },
+              child: const Text('Open Picker'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // Open sheet
+    await tester.tap(find.text('Open Picker'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Select Template'), findsOneWidget);
+    expect(find.text('Greeting'), findsOneWidget);
+    expect(find.text('Curriculum PDF'), findsOneWidget);
+    expect(find.text('syllabus.pdf'), findsOneWidget);
+
+    // Switch to Multi-Select
+    await tester.tap(find.text('Multi-Select'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Done'), findsOneWidget);
+
+    // Select both templates
+    await tester.tap(find.text('Greeting'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Curriculum PDF'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('2 selected'), findsOneWidget);
+    expect(find.text('Send 2 Templates (1 with docs)'), findsOneWidget);
+
+    // Tap Send
+    await tester.tap(find.text('Send 2 Templates (1 with docs)'));
+    await tester.pumpAndSettle();
+
+    expect(dispatchedResult, isNotNull);
+    expect(
+      dispatchedResult!.message,
+      'Hello Nimal Perera, welcome to our institute!\n\nHere is the course syllabus.',
+    );
+    expect(dispatchedResult!.documentPaths, ['/mock/syllabus.pdf']);
   });
 }
