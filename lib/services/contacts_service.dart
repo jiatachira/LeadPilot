@@ -125,10 +125,6 @@ abstract interface class AppSettingsStore {
 
   Future<void> savePreferredSimSlot(int slot);
 
-  Future<bool> readFloatingCallHead();
-
-  Future<void> saveFloatingCallHead(bool enabled);
-
   Future<String> readPreferredCallingApp();
 
   Future<void> savePreferredCallingApp(String packageName);

@@ -1643,13 +1643,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _pendingCallStudent = null;
       _callStartedAt = null;
     });
-
-    try {
-      await CallerIdService.endCall();
-    } catch (_) {}
-    try {
-      await CallerIdService.dismissFloatingCallHead();
-    } catch (_) {}
   }
 
   Future<int?> _showSimChoiceSheet(
@@ -1918,7 +1911,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             }
           }
 
-          final floatingHead = await _settingsStore.readFloatingCallHead();
           _pendingCallStudent = student;
           _callStartedAt = DateTime.now();
 
@@ -1930,7 +1922,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             phone: student.phone,
             simSlot: preferredSlot,
             name: student.name,
-            showFloatingHead: floatingHead,
             callingAppPackage: preferredApp,
           );
 

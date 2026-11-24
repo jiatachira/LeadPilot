@@ -20,7 +20,6 @@ class SecureAppSettingsStore implements AppSettingsStore {
   static const _autoLogCallDurationKey = 'student_call_auto_log_call_duration';
   static const _directCallingKey = 'student_call_direct_calling';
   static const _preferredSimSlotKey = 'student_call_preferred_sim_slot';
-  static const _floatingCallHeadKey = 'student_call_floating_call_head';
   static const _preferredCallingAppKey = 'student_call_preferred_calling_app';
   final FlutterSecureStorage _storage;
 
@@ -265,16 +264,6 @@ class SecureAppSettingsStore implements AppSettingsStore {
       _storage.write(key: _preferredSimSlotKey, value: slot.toString());
 
   @override
-  Future<bool> readFloatingCallHead() async {
-    final value = await _storage.read(key: _floatingCallHeadKey);
-    return value != 'false';
-  }
-
-  @override
-  Future<void> saveFloatingCallHead(bool enabled) =>
-      _storage.write(key: _floatingCallHeadKey, value: enabled.toString());
-
-  @override
   Future<String> readPreferredCallingApp() async {
     final value = await _storage.read(key: _preferredCallingAppKey);
     return value ?? '';
@@ -435,7 +424,6 @@ class MemoryAppSettingsStore implements AppSettingsStore {
   bool autoLogCallDuration = true;
   bool directCalling = true;
   int preferredSimSlot = -1;
-  bool floatingCallHead = true;
 
   @override
   Future<bool> readAutoCheckUpdates() async => autoCheckUpdates;
@@ -470,14 +458,6 @@ class MemoryAppSettingsStore implements AppSettingsStore {
   }
 
   String preferredCallingApp = '';
-
-  @override
-  Future<bool> readFloatingCallHead() async => floatingCallHead;
-
-  @override
-  Future<void> saveFloatingCallHead(bool enabled) async {
-    floatingCallHead = enabled;
-  }
 
   @override
   Future<String> readPreferredCallingApp() async => preferredCallingApp;

@@ -36,7 +36,6 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
   bool _directCalling = true;
   int _preferredSimSlot = -1;
   String _preferredCallingApp = '';
-  bool _floatingCallHead = true;
   List<Map<String, dynamic>> _detectedSimSlots = [];
   List<Map<String, dynamic>> _detectedCallingApps = [];
   int _cachedCount = 0;
@@ -109,8 +108,6 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
         await widget.settingsStore?.readPreferredSimSlot() ?? -1;
     final preferredCallingApp =
         await widget.settingsStore?.readPreferredCallingApp() ?? '';
-    final floatingCallHead =
-        await widget.settingsStore?.readFloatingCallHead() ?? true;
     final sims = await CallerIdService.getSimSlots();
     final callingApps = await CallerIdService.getCallingApps();
     var count = await CallerIdService.getCachedCount();
@@ -127,7 +124,6 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
         _directCalling = directCalling;
         _preferredSimSlot = preferredSimSlot;
         _preferredCallingApp = preferredCallingApp;
-        _floatingCallHead = floatingCallHead;
         _detectedSimSlots = sims;
         _detectedCallingApps = callingApps;
         _cachedCount = count > 0 ? count : widget.students.length;
@@ -687,23 +683,6 @@ class _SettingsHubSheetState extends State<SettingsHubSheet> {
                         onTap: _showCallingAppDialog,
                       ),
                     ],
-                    Divider(
-                      height: 1,
-                      indent: 56,
-                      color: theme.colorScheme.outlineVariant,
-                    ),
-                    SwitchListTile(
-                      secondary: const Icon(Icons.chat_bubble_outline_rounded),
-                      title: const Text('Floating Call Head (1-Tap End Call)'),
-                      subtitle: const Text(
-                        'Show floating card with student name & 1-tap End Call button',
-                      ),
-                      value: _floatingCallHead,
-                      onChanged: (val) async {
-                        setState(() => _floatingCallHead = val);
-                        await widget.settingsStore?.saveFloatingCallHead(val);
-                      },
-                    ),
                   ],
                 ),
               ),

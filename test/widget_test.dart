@@ -4194,11 +4194,10 @@ void main() {
     expect(formatCallTimer(-5), '00:00');
   });
 
-  test('MemoryAppSettingsStore stores and reads directCalling, preferredSimSlot, floatingCallHead, and preferredCallingApp', () async {
+  test('MemoryAppSettingsStore stores and reads directCalling, preferredSimSlot, and preferredCallingApp', () async {
     final store = MemoryAppSettingsStore();
     expect(await store.readDirectCalling(), isTrue);
     expect(await store.readPreferredSimSlot(), -1);
-    expect(await store.readFloatingCallHead(), isTrue);
     expect(await store.readPreferredCallingApp(), '');
 
     await store.saveDirectCalling(false);
@@ -4207,14 +4206,11 @@ void main() {
     await store.savePreferredSimSlot(1);
     expect(await store.readPreferredSimSlot(), 1);
 
-    await store.saveFloatingCallHead(false);
-    expect(await store.readFloatingCallHead(), isFalse);
-
     await store.savePreferredCallingApp('com.google.android.dialer');
     expect(await store.readPreferredCallingApp(), 'com.google.android.dialer');
   });
 
-  testWidgets('Settings displays Direct In-App Calling and Floating Call Head toggles', (tester) async {
+  testWidgets('Settings displays Direct In-App Calling toggle', (tester) async {
     final store = MemoryAppSettingsStore();
     await tester.pumpWidget(
       MaterialApp(
@@ -4234,7 +4230,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Direct In-App Calling'), findsOneWidget);
-    expect(find.text('Floating Call Head (1-Tap End Call)'), findsOneWidget);
+    expect(find.text('Floating Call Head (1-Tap End Call)'), findsNothing);
   });
 
   testWidgets(

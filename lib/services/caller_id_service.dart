@@ -212,7 +212,6 @@ class CallerIdService {
     required String phone,
     int simSlot = -1,
     String? name,
-    bool showFloatingHead = true,
     String? callingAppPackage,
   }) async {
     try {
@@ -220,7 +219,6 @@ class CallerIdService {
         'phone': phone,
         'simSlot': simSlot,
         'name': name,
-        'showFloatingHead': showFloatingHead,
         'callingAppPackage': callingAppPackage,
       });
       return res ?? false;
@@ -229,39 +227,6 @@ class CallerIdService {
     } catch (_) {
       return false;
     }
-  }
-
-  static Future<bool> endCall() async {
-    try {
-      final res = await channel.invokeMethod<bool>('endCall');
-      return res ?? false;
-    } on MissingPluginException {
-      return false;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static Future<void> showFloatingCallHead({
-    required String name,
-    required String phone,
-  }) async {
-    try {
-      await channel.invokeMethod('showFloatingCallHead', {
-        'name': name,
-        'phone': phone,
-      });
-    } on MissingPluginException {
-      // In tests
-    } catch (_) {}
-  }
-
-  static Future<void> dismissFloatingCallHead() async {
-    try {
-      await channel.invokeMethod('dismissFloatingCallHead');
-    } on MissingPluginException {
-      // In tests
-    } catch (_) {}
   }
 
   static Future<void> syncStudents(List<Student> students) async {

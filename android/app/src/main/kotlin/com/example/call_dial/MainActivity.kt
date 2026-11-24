@@ -333,14 +333,11 @@ class MainActivity : FlutterFragmentActivity() {
                         if (granted) {
                             result.success(true)
                         } else {
-                            val permissions = mutableListOf(Manifest.permission.CALL_PHONE)
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                                permissions.add(Manifest.permission.ANSWER_PHONE_CALLS)
-                            }
+                            val permissions = arrayOf(Manifest.permission.CALL_PHONE)
                             pendingCallPermissionResult = result
                             ActivityCompat.requestPermissions(
                                 this,
-                                permissions.toTypedArray(),
+                                permissions,
                                 callPermissionRequestCode
                             )
                         }
@@ -350,7 +347,6 @@ class MainActivity : FlutterFragmentActivity() {
                             val phone = call.argument<String>("phone") ?: ""
                             val simSlot = call.argument<Int>("simSlot") ?: -1
                             val name = call.argument<String>("name") ?: ""
-                            val showHead = call.argument<Boolean>("showFloatingHead") ?: true
 
                             if (phone.isBlank()) {
                                 result.error("INVALID_PHONE", "Phone number is empty", null)
@@ -411,41 +407,10 @@ class MainActivity : FlutterFragmentActivity() {
                                 }
                             }
 
-                            if (showHead && Settings.canDrawOverlays(this)) {
-                                FloatingCallHeadManager.show(applicationContext, name.ifBlank { cleanPhone }, cleanPhone)
-                            }
-
                             startActivity(intent)
                             result.success(true)
                         } catch (e: Exception) {
                             result.error("CALL_ERROR", e.message, null)
-                        }
-                    }
-                    "endCall" -> {
-                        try {
-                            val ended = FloatingCallHeadManager.endActiveCall(applicationContext)
-                            FloatingCallHeadManager.dismiss(applicationContext)
-                            result.success(ended)
-                        } catch (e: Exception) {
-                            result.error("END_CALL_ERROR", e.message, null)
-                        }
-                    }
-                    "showFloatingCallHead" -> {
-                        try {
-                            val name = call.argument<String>("name") ?: "Student Lead"
-                            val phone = call.argument<String>("phone") ?: ""
-                            FloatingCallHeadManager.show(applicationContext, name, phone)
-                            result.success(true)
-                        } catch (e: Exception) {
-                            result.error("OVERLAY_ERROR", e.message, null)
-                        }
-                    }
-                    "dismissFloatingCallHead" -> {
-                        try {
-                            FloatingCallHeadManager.dismiss(applicationContext)
-                            result.success(true)
-                        } catch (e: Exception) {
-                            result.error("DISMISS_ERROR", e.message, null)
                         }
                     }
                     else -> result.notImplemented()
