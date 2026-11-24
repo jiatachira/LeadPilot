@@ -2322,7 +2322,7 @@ void main() {
       expect(find.text('Caller ID'), findsOneWidget);
       expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
       expect(testPopupFinder, findsOneWidget);
-      expect(find.text('LeadPilot v1.26.0'), findsOneWidget);
+      expect(find.text('LeadPilot v1.27.0'), findsOneWidget);
 
       await tester.tap(testPopupFinder);
       await tester.pumpAndSettle();
@@ -3660,7 +3660,7 @@ void main() {
       await tester.tap(checkBtn);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
-      expect(find.text('LeadPilot is up to date (v1.26.0).'), findsOneWidget);
+      expect(find.text('LeadPilot is up to date (v1.27.0).'), findsOneWidget);
 
       // Toggle Auto-check
       final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
@@ -4299,6 +4299,17 @@ void main() {
       expect(student.parsedAddedDate!.year, 2026);
       expect(student.parsedNextCallDate, isNotNull);
       expect(student.parsedNextCallDate!.year, 2026);
+    },
+  );
+
+  test(
+    'Phase 3 Clean Architecture: exports all modular components and version is 1.27.0',
+    () {
+      expect(kAppVersion, '1.27.0');
+      final store = MemoryAppSettingsStore();
+      expect(store, isNotNull);
+      const student = Student(name: 'Enterprise Lead', phone: '0771234567');
+      expect(student.name, 'Enterprise Lead');
     },
   );
 }
