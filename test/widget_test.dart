@@ -817,7 +817,11 @@ void main() {
 
     await tester.tap(find.text('Mia Patel'));
     await tester.pumpAndSettle();
-    expect(find.text('Update Mia Patel'), findsOneWidget);
+    expect(find.text('Edit details'), findsOneWidget);
+
+    await tester.tap(find.text('Edit details'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Edit Details'), findsOneWidget);
 
     await tester.enterText(
       find.byKey(const ValueKey('edit-name-input')),
@@ -832,7 +836,6 @@ void main() {
     await tester.enterText(fields.at(3), 'Colombo');
     await tester.enterText(fields.at(4), 'A');
     await tester.enterText(fields.at(5), 'B');
-    await tester.enterText(fields.at(7), 'Interested in A/L classes');
     await tester.ensureVisible(find.text('Same as contact number'));
     await tester.tap(find.text('Same as contact number'));
     await tester.pumpAndSettle();
@@ -845,7 +848,17 @@ void main() {
     await tester.tap(find.text('A/L').last);
     await tester.pumpAndSettle();
 
-    final statusDropdown = find.byType(DropdownButtonFormField<String>).last;
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final remarkField = find.widgetWithText(
+      TextFormField,
+      'Call remark (optional)',
+    );
+    await tester.enterText(remarkField, 'Interested in A/L classes');
+
+    final statusDropdown = find.byType(DropdownButtonFormField<String>).first;
     await tester.ensureVisible(statusDropdown);
     await tester.tap(statusDropdown);
     await tester.pumpAndSettle();
@@ -858,7 +871,7 @@ void main() {
     await tester.tap(find.text('Future'));
     await tester.pumpAndSettle();
 
-    final reminderButton = find.text('Next call date & time (optional)');
+    final reminderButton = find.text('Pick date & time');
     await tester.ensureVisible(reminderButton);
     await tester.tap(reminderButton);
     await tester.pumpAndSettle();
@@ -867,8 +880,8 @@ void main() {
     await tester.tap(find.text('OK').last);
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.text('Update Details'));
-    await tester.tap(find.text('Update Details'));
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(find.text('Allow exact call reminders'), findsOneWidget);
     await tester.tap(find.text('Open settings'));
@@ -924,18 +937,18 @@ void main() {
 
     await tester.tap(find.text('Mia Fernando'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('View History'));
-    await tester.tap(find.text('View History'));
+    await tester.ensureVisible(find.text('View history'));
+    await tester.tap(find.text('View history'));
     await tester.pumpAndSettle();
     expect(find.text('Call attempt history'), findsOneWidget);
     expect(find.text('Future'), findsWidgets);
     expect(find.textContaining('Interested in A/L classes'), findsOneWidget);
     await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Clear reminder'));
-    await tester.tap(find.text('Clear reminder'));
-    await tester.ensureVisible(find.text('Update Details'));
-    await tester.tap(find.text('Update Details'));
+    await tester.ensureVisible(find.text('Clear'));
+    await tester.tap(find.text('Clear'));
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(reminderScheduler.cancelled, hasLength(1));
     expect(reminderScheduler.cancelled.single.phone, '555-0199');
@@ -984,25 +997,25 @@ void main() {
 
     await tester.tap(find.text('Mia Patel'));
     await tester.pumpAndSettle();
-    expect(find.text('Next call date & time (optional)'), findsOneWidget);
+    expect(find.text('Pick date & time'), findsOneWidget);
 
-    await tester.ensureVisible(find.text('Next call date & time (optional)'));
-    await tester.tap(find.text('Next call date & time (optional)'));
+    await tester.ensureVisible(find.text('Pick date & time'));
+    await tester.tap(find.text('Pick date & time'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    expect(find.text('Next call date & time (optional)'), findsOneWidget);
+    expect(find.text('Pick date & time'), findsOneWidget);
 
-    await tester.tap(find.text('Next call date & time (optional)'));
+    await tester.tap(find.text('Pick date & time'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('OK').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    expect(find.text('Next call date & time (optional)'), findsOneWidget);
+    expect(find.text('Pick date & time'), findsOneWidget);
 
-    await tester.ensureVisible(find.text('Update Details'));
-    await tester.tap(find.text('Update Details'));
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
     final update = requests.lastWhere((request) => request.method == 'POST');
@@ -1501,7 +1514,7 @@ void main() {
 
       await tester.tap(find.text('Edit'));
       await tester.pumpAndSettle();
-      expect(find.text('Update Details'), findsOneWidget);
+      expect(find.text('Save'), findsOneWidget);
     },
   );
 
@@ -1933,10 +1946,10 @@ void main() {
       await tester.tap(find.text('Kamal Perera'));
       await tester.pumpAndSettle();
 
-      final commentField = find.byType(TextFormField).at(7);
+      final commentField = find.byType(TextFormField).first;
       await tester.enterText(commentField, 'Offline call notes');
-      await tester.ensureVisible(find.text('Update Details'));
-      await tester.tap(find.text('Update Details'));
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       expect(settingsStore.offlineQueue, hasLength(1));
@@ -2200,9 +2213,9 @@ void main() {
       await tester.tap(find.text('Kamal Perera'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Update Details'), findsOneWidget);
-      await tester.ensureVisible(find.text('Update Details'));
-      await tester.tap(find.text('Update Details'));
+      expect(find.text('Save'), findsOneWidget);
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       expect(find.text('Move to Inactive?'), findsOneWidget);
@@ -3080,8 +3093,8 @@ void main() {
       expect(find.textContaining('Overdue:'), findsNothing);
 
       // Save
-      await tester.ensureVisible(find.text('Update Details'));
-      await tester.tap(find.text('Update Details'));
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       expect(updatedResult, isNotNull);
@@ -3130,13 +3143,78 @@ void main() {
       expect(find.textContaining('Overdue:'), findsOneWidget);
 
       // Save directly without picking a new reminder
-      await tester.ensureVisible(find.text('Update Details'));
-      await tester.tap(find.text('Update Details'));
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
       expect(updatedResult, isNotNull);
       // nextCallDateTime must be empty string so past reminder is not preserved
       expect(updatedResult!.nextCallDateTime, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'EditStudentSheet opens EditDetailsScreen via Edit details button and returns updated student to Log call screen',
+    (tester) async {
+      const student = Student(
+        name: 'Kasun Bandara',
+        phone: '0771122334',
+        callStatus: 'Pending',
+      );
+
+      Student? updatedResult;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () async {
+                  updatedResult = await showModalBottomSheet<Student>(
+                    context: context,
+                    isScrollControlled: true,
+                    builder: (_) => EditStudentSheet(student: student),
+                  );
+                },
+                child: const Text('Open Sheet'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Open Sheet'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Kasun Bandara'), findsOneWidget);
+      expect(find.byTooltip('Call Kasun Bandara'), findsOneWidget);
+
+      await tester.tap(find.text('Edit details'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Edit Details · Kasun Bandara'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('edit-name-input')),
+        'Kasun B. Fernando',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('edit-phone-input')),
+        '0779988776',
+      );
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      // Back on Log call screen with updated name
+      expect(find.text('Kasun B. Fernando'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(updatedResult, isNotNull);
+      expect(updatedResult!.name, 'Kasun B. Fernando');
+      expect(updatedResult!.phone, '0779988776');
     },
   );
 

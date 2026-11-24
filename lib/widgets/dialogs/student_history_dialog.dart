@@ -31,50 +31,10 @@ class _StudentHistoryDialogState extends State<StudentHistoryDialog> {
 
   Future<void> _editLastRemark(String currentText) async {
     final controller = TextEditingController(text: currentText);
-    bool isPolishing = false;
-    bool isListeningVoice = false;
-    String voiceLanguage = 'si';
-    String preVoiceText = '';
-    final voiceService =
-        widget.voiceToTextService ?? DefaultVoiceToTextService();
 
     final updatedText = await showDialog<String>(
       context: context,
-      builder: (dialogCtx) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          Future<void> toggleVoice() async {
-            if (isListeningVoice) {
-              await voiceService.stop();
-              setDialogState(() => isListeningVoice = false);
-              return;
-            }
-            preVoiceText = controller.text;
-            setDialogState(() => isListeningVoice = true);
-            final localeId = voiceLanguage == 'si' ? 'si_LK' : 'en_US';
-            await voiceService.listen(
-              localeId: localeId,
-              onResult: (words) {
-                if (words.trim().isEmpty) return;
-                setDialogState(() {
-                  final p = preVoiceText.trim();
-                  controller.text = p.isEmpty ? words.trim() : '$p ${words.trim()}';
-                  controller.selection = TextSelection.fromPosition(
-                    TextPosition(offset: controller.text.length),
-                  );
-                });
-              },
-              onStatus: (st) {
-                if (st == 'notListening' || st == 'done') {
-                  setDialogState(() => isListeningVoice = false);
-                }
-              },
-              onError: (err) {
-                setDialogState(() => isListeningVoice = false);
-              },
-            );
-          }
-
-          return AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
             title: const Row(
               children: [
                 Icon(Icons.edit_note_rounded, color: Color(0xFF8B5CF6)),
@@ -107,203 +67,12 @@ class _StudentHistoryDialogState extends State<StudentHistoryDialog> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Wrap(
-                    alignment: WrapAlignment.spaceBetween,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      if (isListeningVoice)
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.fiber_manual_record,
-                              color: Colors.redAccent,
-                              size: 10,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Listening (${voiceLanguage == 'si' ? 'Sinhala' : 'EN'})...',
-                              style: const TextStyle(
-                                color: Colors.redAccent,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        )
-                      else
-                        const SizedBox.shrink(),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          InkWell(
-                            borderRadius: BorderRadius.circular(16),
-                            onTap: () {
-                              setDialogState(() {
-                                voiceLanguage =
-                                    voiceLanguage == 'si' ? 'en' : 'si';
-                              });
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(16),
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainerHighest,
-                                border: Border.all(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .outlineVariant
-                                      .withValues(alpha: 0.6),
-                                ),
-                              ),
-                              child: Text(
-                                voiceLanguage == 'si' ? 'සිංහල' : 'EN',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: Theme.of(context).colorScheme.primary,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              foregroundColor: isListeningVoice
-                                  ? Colors.redAccent
-                                  : const Color(0xFF00966D),
-                              side: BorderSide(
-                                color: isListeningVoice
-                                    ? Colors.redAccent
-                                    : const Color(0xFF00966D)
-                                        .withValues(alpha: 0.6),
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                            onPressed: toggleVoice,
-                            icon: Icon(
-                              isListeningVoice
-                                  ? Icons.stop_rounded
-                                  : Icons.mic_rounded,
-                              size: 13,
-                            ),
-                            label: Text(
-                              isListeningVoice ? 'Stop' : '🎙️ Speak',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              foregroundColor: const Color(0xFF8B5CF6),
-                              side: BorderSide(
-                                color: const Color(0xFF8B5CF6)
-                                    .withValues(alpha: 0.6),
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                            onPressed: isPolishing
-                                ? null
-                                : () async {
-                                    final raw = controller.text.trim();
-                                    if (raw.isEmpty) return;
-                                    final store = widget.settingsStore ??
-                                        SecureAppSettingsStore();
-                                    final apiKey =
-                                        await store.readGeminiApiKey();
-                                    if (apiKey.trim().isEmpty) {
-                                      if (context.mounted) {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          const SnackBar(
-                                            content: Text(
-                                              'Please configure Gemini API key in Settings.',
-                                            ),
-                                            duration: Duration(seconds: 3),
-                                          ),
-                                        );
-                                      }
-                                      return;
-                                    }
-                                    setDialogState(() => isPolishing = true);
-                                    try {
-                                      final service = widget.geminiService ??
-                                          GeminiService();
-                                      final model =
-                                          await store.readGeminiModel();
-                                      final polished =
-                                          await service.polishRemark(
-                                        apiKey: apiKey,
-                                        rawRemark: raw,
-                                        model: model,
-                                      );
-                                      if (polished.isNotEmpty) {
-                                        controller.text = polished;
-                                        controller.selection =
-                                            TextSelection.fromPosition(
-                                          TextPosition(offset: polished.length),
-                                        );
-                                      }
-                                    } catch (e) {
-                                      if (context.mounted) {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          SnackBar(
-                                            content:
-                                                Text('Could not polish: $e'),
-                                          ),
-                                        );
-                                      }
-                                    } finally {
-                                      setDialogState(() => isPolishing = false);
-                                    }
-                                  },
-                            icon: isPolishing
-                                ? const SizedBox(
-                                    width: 12,
-                                    height: 12,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(
-                                    Icons.auto_awesome_rounded,
-                                    size: 14,
-                                  ),
-                            label: Text(
-                              isPolishing ? 'Polishing...' : '✨ Polish',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                  VoiceAiRemarkControls(
+                    controller: controller,
+                    settingsStore: widget.settingsStore,
+                    geminiService: widget.geminiService,
+                    voiceToTextService: widget.voiceToTextService,
+                    compact: true,
                   ),
                 ],
               ),
@@ -321,9 +90,7 @@ class _StudentHistoryDialogState extends State<StudentHistoryDialog> {
                 child: const Text('Save'),
               ),
             ],
-          );
-        },
-      ),
+          ),
     );
 
     if (updatedText == null || updatedText == currentText.trim()) return;
