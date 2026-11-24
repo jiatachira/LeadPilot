@@ -1126,37 +1126,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Widget _leadFilterChip({required String label, required _LeadFilter filter}) {
-    final selected = _leadFilter == filter;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      showCheckmark: false,
-      onSelected: (_) {
-        HapticFeedback.selectionClick();
-        setState(() => _leadFilter = filter);
-      },
-      selectedColor: _navy,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      side: BorderSide(
-        color: selected
-            ? _navy
-            : isDark
-            ? const Color(0xFF344453)
-            : const Color(0xFFE0E6EC),
-      ),
-      labelStyle: TextStyle(
-        color: selected
-            ? Colors.white
-            : Theme.of(context).colorScheme.onSurface,
-        fontWeight: FontWeight.w700,
-        fontSize: 12,
-      ),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-    );
-  }
-
   Future<void> _exportStudentsToCsv(
     List<Student> students, {
     String fileName = 'student_leads.csv',
@@ -1190,7 +1159,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final students = _filteredStudents;
     final selectedStudents = _selectedStudents;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
       appBar: AppBar(
@@ -1243,250 +1211,200 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ]
             : [
                 IconButton(
-                  tooltip: 'Select multiple leads',
-                  onPressed: () {
-                    setState(() {
-                      _isSelectionMode = true;
-                    });
+                  key: const ValueKey('sync-appbar-button'),
+                  tooltip: _lastSyncTime != null
+                      ? 'Last synced: $_lastSyncTime'
+                      : (_syncStatus.isNotEmpty ? _syncStatus : 'Sync now'),
+                  onPressed: _isSyncing ? null : () => _syncWithGoogleSheet(),
+                  icon: _isSyncing
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : _offlineQueue.isNotEmpty
+                      ? Badge(
+                          label: Text('${_offlineQueue.length}'),
+                          child: const Icon(Icons.cloud_upload_outlined),
+                        )
+                      : Icon(
+                          _hasSynced
+                              ? Icons.cloud_done_rounded
+                              : Icons.cloud_outlined,
+                          color: _hasSynced ? _green : null,
+                        ),
+                ),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert_rounded),
+                  tooltip: 'More options',
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'select_multiple':
+                        setState(() => _isSelectionMode = true);
+                        break;
+                      case 'settings':
+                        _openSettings();
+                        break;
+                      case 'lock_app':
+                        widget.onLogout();
+                        break;
+                    }
                   },
-                  icon: const Icon(Icons.checklist_rounded),
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'select_multiple',
+                      child: Row(
+                        children: [
+                          Icon(Icons.checklist_rounded),
+                          SizedBox(width: 12),
+                          Text('Select multiple'),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'settings',
+                      child: Row(
+                        children: [
+                          Icon(Icons.settings_outlined),
+                          SizedBox(width: 12),
+                          Text('Settings'),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'lock_app',
+                      child: Row(
+                        children: [
+                          Icon(Icons.lock_outline_rounded),
+                          SizedBox(width: 12),
+                          Text('Lock app'),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  tooltip: 'Settings',
-                  onPressed: _openSettings,
-                  icon: const Icon(Icons.settings_outlined),
-                ),
-                IconButton(
-                  tooltip: 'Lock app',
-                  onPressed: widget.onLogout,
-                  icon: const Icon(Icons.lock_outline_rounded),
-                ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 4),
               ],
       ),
       body: SafeArea(
         child: Stack(
           children: [
             Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(22, 4, 22, 18),
-              child: Column(
-                children: [
-                  Row(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  child: Column(
                     children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _searchController,
-                          onChanged: (value) => setState(() => _query = value),
-                          decoration: InputDecoration(
-                            hintText: 'Search name, status, phone or comments',
-                            hintStyle: TextStyle(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
-                              fontSize: 14,
-                            ),
-                            prefixIcon: const Icon(Icons.search_rounded),
-                            suffixIcon: _query.isEmpty
-                                ? null
-                                : IconButton(
-                                    tooltip: 'Clear search',
-                                    onPressed: () {
-                                      _searchController.clear();
-                                      setState(() => _query = '');
-                                    },
-                                    icon: const Icon(Icons.close_rounded),
-                                  ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              vertical: 15,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        _leadFilterChip(
-                          label: 'All Leads',
-                          filter: _LeadFilter.all,
-                        ),
-                        const SizedBox(width: 8),
-                        _leadFilterChip(
-                          label: 'New Leads',
-                          filter: _LeadFilter.newLeads,
-                        ),
-                        const SizedBox(width: 8),
-                        _leadFilterChip(
-                          label: 'Today Follow-up',
-                          filter: _LeadFilter.todayFollowUp,
-                        ),
-                        if (_hasActiveFilters) ...[
-                          const SizedBox(width: 8),
-                          InputChip(
-                            avatar: const Icon(
-                              Icons.filter_alt_rounded,
-                              size: 16,
-                              color: Colors.white,
-                            ),
-                            label: Text(
-                              _statusFilter ?? 'Date Filter',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                              ),
-                            ),
-                            backgroundColor: _navy,
-                            deleteIcon: const Icon(
-                              Icons.close_rounded,
-                              size: 16,
-                              color: Colors.white,
-                            ),
-                            onDeleted: () {
-                              setState(() {
-                                _statusFilter = null;
-                                _dateFrom = null;
-                                _dateTo = null;
-                              });
-                            },
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  _SyncStatusRow(
-                    status: _syncStatus,
-                    isSyncing: _isSyncing,
-                    isConnected: _hasSynced,
-                    lastSyncTime: _lastSyncTime,
-                    offlineQueueCount: _offlineQueue.length,
-                    onSync: () => _syncWithGoogleSheet(),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(28),
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(22, 24, 22, 16),
-                      child: Row(
+                      Row(
                         children: [
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Your students',
-                                  style: Theme.of(context).textTheme.titleLarge
-                                      ?.copyWith(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurface,
-                                        fontWeight: FontWeight.w800,
+                            child: TextField(
+                              controller: _searchController,
+                              onChanged: (value) =>
+                                  setState(() => _query = value),
+                              decoration: InputDecoration(
+                                hintText:
+                                    'Search name, status, phone or comments',
+                                hintStyle: TextStyle(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                  fontSize: 14,
+                                ),
+                                prefixIcon: const Icon(Icons.search_rounded),
+                                suffixIcon: _query.isEmpty
+                                    ? null
+                                    : IconButton(
+                                        tooltip: 'Clear search',
+                                        onPressed: () {
+                                          _searchController.clear();
+                                          setState(() => _query = '');
+                                        },
+                                        icon: const Icon(Icons.close_rounded),
                                       ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  vertical: 14,
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  '${_students.length} contacts • Keep in touch',
-                                  style: TextStyle(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
                           ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? const Color(0xFF17382F)
-                                  : const Color(0xFFEAF6F2),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.circle,
-                                  size: 8,
-                                  color: _green,
-                                ),
-                                const SizedBox(width: 7),
-                                Text(
-                                  '${students.length} shown',
-                                  style: const TextStyle(
-                                    color: _green,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
+                          const SizedBox(width: 8),
+                          IconButton(
+                            tooltip: 'Filter leads',
+                            onPressed: _openLeadFilters,
+                            icon: Badge(
+                              isLabelVisible: _hasActiveFilters,
+                              smallSize: 8,
+                              child: const Icon(Icons.tune_rounded),
                             ),
                           ),
                         ],
                       ),
-                    ),
-                    Expanded(
-                      child: students.isEmpty
-                          ? _EmptySearchState(
-                              isSearching:
-                                  _query.isNotEmpty ||
-                                  _leadFilter != _LeadFilter.all ||
-                                  _hasActiveFilters,
-                            )
-                          : ListView.builder(
-                              padding: const EdgeInsets.fromLTRB(18, 0, 18, 96),
-                              itemCount: students.length,
-                              itemBuilder: (context, index) => StudentCard(
-                                student: students[index],
-                                isSelectionMode: _isSelectionMode,
-                                isSelected: _selectedStudentKeys.contains(
-                                  _selectionKey(students[index]),
-                                ),
-                                onTap: () => _isSelectionMode
-                                    ? _toggleStudentSelection(students[index])
-                                    : _editStudent(students[index]),
-                                onLongPress: () => _isSelectionMode
-                                    ? _toggleStudentSelection(students[index])
-                                    : _showStudentActions(students[index]),
-                                onCall: () => _callStudent(students[index]),
-                                onWhatsApp: () =>
-                                    _openWhatsAppChat(students[index]),
-                                onSms: () => _sendStudentSms(students[index]),
-                                onNote: () => _showStudentNote(students[index]),
-                                onSaveContact: () =>
-                                    _saveStudentContact(students[index]),
-                              ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: SegmentedButton<_LeadFilter>(
+                          segments: const [
+                            ButtonSegment(
+                              value: _LeadFilter.all,
+                              label: Text('All'),
                             ),
-                    ),
-                  ],
+                            ButtonSegment(
+                              value: _LeadFilter.newLeads,
+                              label: Text('New'),
+                            ),
+                            ButtonSegment(
+                              value: _LeadFilter.todayFollowUp,
+                              label: Text('Today'),
+                            ),
+                          ],
+                          selected: {_leadFilter},
+                          onSelectionChanged: (newSelection) {
+                            setState(() {
+                              _leadFilter = newSelection.first;
+                            });
+                          },
+                          showSelectedIcon: false,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+                Expanded(
+                  child: students.isEmpty
+                      ? _EmptySearchState(
+                          isSearching: _query.isNotEmpty ||
+                              _leadFilter != _LeadFilter.all ||
+                              _hasActiveFilters,
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
+                          itemCount: students.length,
+                          itemBuilder: (context, index) => StudentCard(
+                            student: students[index],
+                            isSelectionMode: _isSelectionMode,
+                            isSelected: _selectedStudentKeys.contains(
+                              _selectionKey(students[index]),
+                            ),
+                            onTap: () => _isSelectionMode
+                                ? _toggleStudentSelection(students[index])
+                                : _editStudent(students[index]),
+                            onLongPress: () => _isSelectionMode
+                                ? _toggleStudentSelection(students[index])
+                                : _showStudentActions(students[index]),
+                            onCall: () => _callStudent(students[index]),
+                            onWhatsApp: () =>
+                                _openWhatsAppChat(students[index]),
+                            onSms: () => _sendStudentSms(students[index]),
+                            onNote: () => _showStudentNote(students[index]),
+                            onSaveContact: () =>
+                                _saveStudentContact(students[index]),
+                          ),
+                        ),
+                ),
+              ],
             ),
-          ],
-        ),
-        if (_activeInAppCallStudent != null)
+            if (_activeInAppCallStudent != null)
           Positioned(
             left: _activeCallPillPosition.dx,
             top: _activeCallPillPosition.dy,

@@ -96,9 +96,15 @@ Future<void> enterPin(WidgetTester tester, String pin) async {
   }
 }
 
-Future<void> openSheetSettings(WidgetTester tester) async {
-  await tester.tap(find.byTooltip('Settings'));
+Future<void> openSettings(WidgetTester tester) async {
+  await tester.tap(find.byTooltip('More options'));
   await tester.pumpAndSettle();
+  await tester.tap(find.text('Settings'));
+  await tester.pumpAndSettle();
+}
+
+Future<void> openSheetSettings(WidgetTester tester) async {
+  await openSettings(tester);
   await tester.ensureVisible(find.text('Google Sheets Sync'));
   await tester.tap(find.text('Google Sheets Sync'));
   await tester.pumpAndSettle();
@@ -418,12 +424,11 @@ void main() {
 
     final card = tester.widget<Card>(find.byType(Card).first);
     final shape = card.shape! as RoundedRectangleBorder;
-    expect(shape.side.color, const Color(0xFFF0F2F5));
     expect(shape.side.width, 1.0);
     expect(find.text('0700000000'), findsOneWidget);
     final name = tester.widget<Text>(find.text(fullName));
-    expect(name.maxLines, isNull);
-    expect(name.overflow, isNull);
+    expect(name.maxLines, 1);
+    expect(name.overflow, TextOverflow.ellipsis);
     expect(find.text('3d'), findsNothing);
   });
 
@@ -569,7 +574,7 @@ void main() {
     await enterPin(tester, '2580');
     await tester.pumpAndSettle();
 
-    expect(find.text('Your students'), findsOneWidget);
+    expect(find.text('LeadPilot'), findsOneWidget);
     expect(find.text('No students yet'), findsOneWidget);
   });
 
@@ -591,7 +596,7 @@ void main() {
 
     await enterPin(tester, '2580');
     await tester.pumpAndSettle();
-    expect(find.text('Your students'), findsOneWidget);
+    expect(find.text('LeadPilot'), findsOneWidget);
   });
 
   testWidgets('locks and validates the saved PIN before reopening', (
@@ -604,7 +609,9 @@ void main() {
     await enterPin(tester, '1234');
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Lock app'));
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lock app'));
     await tester.pumpAndSettle();
     expect(find.text('Welcome Back - Enter PIN'), findsOneWidget);
 
@@ -617,7 +624,7 @@ void main() {
 
     await enterPin(tester, '1234');
     await tester.pumpAndSettle();
-    expect(find.text('Your students'), findsOneWidget);
+    expect(find.text('LeadPilot'), findsOneWidget);
   });
 
   testWidgets('parses multiple lines and adds them locally', (tester) async {
@@ -646,8 +653,6 @@ void main() {
       tester.getTopLeft(find.text('Mia Patel')).dy,
       lessThan(tester.getTopLeft(find.text('Noah Lee')).dy),
     );
-    expect(find.text('Facebook'), findsNWidgets(2));
-    expect(find.text('2 contacts • Keep in touch'), findsOneWidget);
   });
 
   testWidgets('fetches sheet contacts and posts newly added students', (
@@ -687,7 +692,7 @@ void main() {
     await tester.tap(find.text('Save & Sync'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Synced'), findsOneWidget);
+    expect(find.byIcon(Icons.cloud_done_rounded), findsOneWidget);
     expect(requests.single.method, 'GET');
 
     await tester.tap(find.text('Add student'));
@@ -764,7 +769,6 @@ void main() {
 
     expect(find.text('Mia Patel'), findsOneWidget);
     expect(find.textContaining('could not be synced'), findsOneWidget);
-    expect(find.text('Sync failed'), findsOneWidget);
   });
 
   testWidgets('edits student details and syncs the update action', (
@@ -915,7 +919,6 @@ void main() {
       reminderScheduler.scheduled.single.dateTime,
       DateTime.parse(payload['nextCallDateTime'] as String),
     );
-    expect(find.text('A/L'), findsOneWidget);
     expect(find.text('Future'), findsWidgets);
     expect(find.textContaining('Call · '), findsOneWidget);
 
@@ -1091,18 +1094,18 @@ void main() {
     expect(find.text('Follow-up Lead'), findsOneWidget);
     expect(find.text('Old Lead'), findsOneWidget);
 
-    await tester.tap(find.text('New Leads'));
+    await tester.tap(find.text('New'));
     await tester.pumpAndSettle();
     expect(find.text('New Lead'), findsOneWidget);
     expect(find.text('Follow-up Lead'), findsNothing);
     expect(find.text('Old Lead'), findsNothing);
 
-    await tester.tap(find.text('Today Follow-up'));
+    await tester.tap(find.text('Today'));
     await tester.pumpAndSettle();
     expect(find.text('Follow-up Lead'), findsOneWidget);
     expect(find.text('New Lead'), findsNothing);
 
-    await tester.tap(find.text('All Leads'));
+    await tester.tap(find.text('All'));
     await tester.pumpAndSettle();
     expect(
       tester.getTopLeft(find.text('New Lead')).dy,
@@ -1174,8 +1177,7 @@ void main() {
     expect(find.text('Not Interested Lead'), findsNothing);
     expect(find.text('Not Potential Lead'), findsNothing);
 
-    await tester.tap(find.byTooltip('Settings'));
-    await tester.pumpAndSettle();
+    await openSettings(tester);
     await tester.ensureVisible(find.text('Lead reports'));
     await tester.tap(find.text('Lead reports'));
     await tester.pumpAndSettle();
@@ -1230,7 +1232,7 @@ void main() {
 
     expect(find.text('Old Pending'), findsOneWidget);
     expect(find.text('Recent Answered'), findsOneWidget);
-    await tester.tap(find.text('New Leads'));
+    await tester.tap(find.text('New'));
     await tester.pumpAndSettle();
     expect(find.text('Old Pending'), findsOneWidget);
     expect(find.text('Recent Answered'), findsNothing);
@@ -1296,7 +1298,7 @@ void main() {
       await enterPin(tester, '2580');
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Today Follow-up'));
+      await tester.tap(find.text('Today'));
       await tester.pumpAndSettle();
 
       expect(find.text('Missed Yesterday Call'), findsOneWidget);
@@ -1359,8 +1361,7 @@ void main() {
     await enterPin(tester, '2580');
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Settings'));
-    await tester.pumpAndSettle();
+    await openSettings(tester);
     await tester.tap(find.text('Filter by date and call status'));
     await tester.pumpAndSettle();
     await tester.tap(find.byType(DropdownButtonFormField<String>).last);
@@ -1416,10 +1417,9 @@ void main() {
     await enterPin(tester, '2580');
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('New Leads'));
+    await tester.tap(find.text('New'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Settings'));
-    await tester.pumpAndSettle();
+    await openSettings(tester);
     await tester.tap(find.text('Save contacts'));
     await tester.pumpAndSettle();
 
@@ -1473,21 +1473,20 @@ void main() {
       await enterPin(tester, '2580');
       await tester.pumpAndSettle();
 
-      expect(find.byTooltip('Call history'), findsNWidgets(2));
-      expect(find.byTooltip('Open WhatsApp chat'), findsNWidgets(2));
-      expect(find.byTooltip('Send SMS'), findsNWidgets(2));
       expect(find.byTooltip('Call student'), findsNWidgets(2));
       final pendingStudentCard = find.ancestor(
         of: find.text('Pending Student'),
         matching: find.byType(Card),
       );
-      final saveContactButton = find.descendant(
+      final moreActionsButton = find.descendant(
         of: pendingStudentCard,
-        matching: find.byTooltip('Save contact'),
+        matching: find.byTooltip('More actions'),
       );
-      expect(saveContactButton, findsOneWidget);
-      await tester.ensureVisible(saveContactButton);
-      await tester.tap(saveContactButton);
+      expect(moreActionsButton, findsOneWidget);
+      await tester.ensureVisible(moreActionsButton);
+      await tester.tap(moreActionsButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save contact'));
       await tester.pumpAndSettle();
 
       expect(contactsService.receivedStudents, hasLength(1));
@@ -1587,8 +1586,7 @@ void main() {
     await enterPin(tester, '2580');
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Settings'));
-    await tester.pumpAndSettle();
+    await openSettings(tester);
     await tester.tap(find.byType(DropdownButtonFormField<ThemeMode>));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Dark').last);
@@ -1668,7 +1666,9 @@ void main() {
     await enterPin(tester, '2580');
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Call history'));
+    await tester.tap(find.byTooltip('More actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('History'));
     await tester.pumpAndSettle();
 
     expect(find.text('Call history · Mia Patel'), findsOneWidget);
@@ -1788,8 +1788,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('First sheet student'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Settings'));
-    await tester.pumpAndSettle();
+    await openSettings(tester);
     await tester.ensureVisible(find.text('Google Sheets Sync'));
     await tester.tap(find.text('Google Sheets Sync'));
     await tester.pumpAndSettle();
@@ -1945,10 +1944,11 @@ void main() {
         settingsStore.offlineQueue.first.student.comment,
         'Offline call notes',
       );
-      expect(find.textContaining('queued'), findsWidgets);
+      expect(find.byIcon(Icons.cloud_upload_outlined), findsOneWidget);
+      expect(find.text('1'), findsOneWidget);
 
       shouldFailPost = false;
-      await tester.tap(find.text('Sync now'));
+      await tester.tap(find.byKey(const ValueKey('sync-appbar-button')));
       await tester.pumpAndSettle();
 
       expect(settingsStore.offlineQueue, isEmpty);
@@ -1993,9 +1993,7 @@ void main() {
       await enterPin(tester, '2580');
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Settings'));
-      await tester.pumpAndSettle();
-
+      await openSettings(tester);
       await tester.tap(find.text('WhatsApp & SMS templates'));
       await tester.pumpAndSettle();
 
@@ -2064,8 +2062,10 @@ void main() {
     await enterPin(tester, '2580');
     await tester.pumpAndSettle();
 
-    final firstWhatsAppBtn = find.byTooltip('Open WhatsApp chat').first;
-    await tester.tap(firstWhatsAppBtn);
+    final moreActionsBtn = find.byTooltip('More actions').first;
+    await tester.tap(moreActionsBtn);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('WhatsApp'));
     await tester.pumpAndSettle();
 
     expect(find.text('Send WhatsApp Message'), findsOneWidget);
@@ -2195,7 +2195,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Kamal Perera'), findsOneWidget);
-      expect(find.text('🚨 5x No Answer'), findsOneWidget);
+      expect(find.text('5'), findsOneWidget);
 
       await tester.tap(find.text('Kamal Perera'));
       await tester.pumpAndSettle();
@@ -2219,7 +2219,7 @@ void main() {
       expect(find.text('Kamal Perera'), findsNothing);
 
       // Verify that syncing with Google Sheet does NOT bring the inactive student back to the active list
-      await tester.tap(find.text('Sync now'));
+      await tester.tap(find.byKey(const ValueKey('sync-appbar-button')));
       await tester.pumpAndSettle();
 
       expect(find.text('Kamal Perera'), findsNothing);
@@ -2312,8 +2312,7 @@ void main() {
       await enterPin(tester, '2580');
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Settings'));
-      await tester.pumpAndSettle();
+      await openSettings(tester);
 
       final testPopupFinder = find.text('Preview / Test Popup');
       await tester.ensureVisible(testPopupFinder);
@@ -2489,7 +2488,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.byTooltip('Call history'), findsOneWidget);
+      await tester.tap(find.byTooltip('More actions'));
+      await tester.pumpAndSettle();
+      expect(find.text('History'), findsOneWidget);
       expect(find.byIcon(Icons.history_rounded), findsOneWidget);
     },
   );
@@ -4107,8 +4108,7 @@ void main() {
       await enterPin(tester, '2580');
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Settings'));
-      await tester.pumpAndSettle();
+      await openSettings(tester);
 
       final directCallingFinder = find.text('Direct In-App Calling');
       await tester.ensureVisible(directCallingFinder);
@@ -4234,7 +4234,7 @@ void main() {
   });
 
   testWidgets(
-    'StudentCard swipe right triggers onCall and swipe left triggers onWhatsApp without removing card',
+    'StudentCard triggers onCall via Call button and onWhatsApp via action menu',
     (tester) async {
       bool callTriggered = false;
       bool whatsAppTriggered = false;
@@ -4258,14 +4258,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Swipe right (startToEnd) -> triggers onCall
-      await tester.drag(find.text('Saman Silva'), const Offset(500, 0));
+      await tester.tap(find.byTooltip('Call student'));
       await tester.pumpAndSettle();
       expect(callTriggered, isTrue);
-      expect(find.text('Saman Silva'), findsOneWidget);
 
-      // Swipe left (endToStart) -> triggers onWhatsApp
-      await tester.drag(find.text('Saman Silva'), const Offset(-500, 0));
+      await tester.tap(find.byTooltip('More actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('WhatsApp'));
       await tester.pumpAndSettle();
       expect(whatsAppTriggered, isTrue);
       expect(find.text('Saman Silva'), findsOneWidget);
