@@ -2322,7 +2322,7 @@ void main() {
       expect(find.text('Caller ID'), findsOneWidget);
       expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
       expect(testPopupFinder, findsOneWidget);
-      expect(find.text('LeadPilot v1.25.0'), findsOneWidget);
+      expect(find.text('LeadPilot v1.26.0'), findsOneWidget);
 
       await tester.tap(testPopupFinder);
       await tester.pumpAndSettle();
@@ -3660,7 +3660,7 @@ void main() {
       await tester.tap(checkBtn);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
-      expect(find.text('LeadPilot is up to date (v1.25.0).'), findsOneWidget);
+      expect(find.text('LeadPilot is up to date (v1.26.0).'), findsOneWidget);
 
       // Toggle Auto-check
       final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
@@ -4273,6 +4273,32 @@ void main() {
       await tester.pumpAndSettle();
       expect(whatsAppTriggered, isTrue);
       expect(find.text('Saman Silva'), findsOneWidget);
+    },
+  );
+
+  test(
+    'Student pre-computes searchIndex and caches parsed dates for fast search and sort',
+    () {
+      const student = Student(
+        name: 'Nimal Jayawardena',
+        phone: '0714567890',
+        location: 'Kandy',
+        callStatus: 'Interested',
+        addedDate: '2026-11-20',
+        nextCallDateTime: '2026-11-25 10:00 AM',
+        comment: 'Very keen on IT degree',
+      );
+
+      expect(student.searchIndex, contains('nimal jayawardena'));
+      expect(student.searchIndex, contains('0714567890'));
+      expect(student.searchIndex, contains('kandy'));
+      expect(student.searchIndex, contains('interested'));
+      expect(student.searchIndex, contains('very keen on it degree'));
+
+      expect(student.parsedAddedDate, isNotNull);
+      expect(student.parsedAddedDate!.year, 2026);
+      expect(student.parsedNextCallDate, isNotNull);
+      expect(student.parsedNextCallDate!.year, 2026);
     },
   );
 }

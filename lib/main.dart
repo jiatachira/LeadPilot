@@ -12,6 +12,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:local_auth/local_auth.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:timezone/data/latest.dart' as timezone_data;
@@ -22,7 +23,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.25.0';
+const String kAppVersion = '1.26.0';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -886,17 +887,44 @@ class SecureAppSettingsStore implements AppSettingsStore {
         value: jsonEncode(queue.map((item) => item.toJson()).toList()),
       );
 
+  Future<File?> _getLocalCacheFile() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      return File('${dir.path}/leadpilot_leads_db.json');
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   Future<List<Student>> readCachedStudents() async {
+    try {
+      final file = await _getLocalCacheFile();
+      if (file != null && await file.exists()) {
+        final content = await file.readAsString();
+        if (content.isNotEmpty) {
+          final decoded = jsonDecode(content);
+          if (decoded is List) {
+            return decoded
+                .whereType<Map<String, dynamic>>()
+                .map((item) => Student.fromJson(item))
+                .toList();
+          }
+        }
+      }
+    } catch (_) {}
+
     final saved = await _storage.read(key: _cachedStudentsKey);
     if (saved == null || saved.isEmpty) return const [];
     try {
       final decoded = jsonDecode(saved);
       if (decoded is! List) return const [];
-      return decoded
+      final students = decoded
           .whereType<Map<String, dynamic>>()
           .map((item) => Student.fromJson(item))
           .toList();
+      unawaited(saveCachedStudents(students));
+      return students;
     } catch (_) {
       return const [];
     }
@@ -904,10 +932,29 @@ class SecureAppSettingsStore implements AppSettingsStore {
 
   @override
   Future<void> saveCachedStudents(List<Student> students) async {
-    await _storage.write(
-      key: _cachedStudentsKey,
-      value: jsonEncode(students.map((s) => s.toJson()).toList()),
-    );
+    bool fileSaved = false;
+    try {
+      final file = await _getLocalCacheFile();
+      if (file != null) {
+        final tempFile = File('${file.path}.tmp');
+        final payload = jsonEncode(students.map((s) => s.toJson()).toList());
+        await tempFile.writeAsString(payload, flush: true);
+        if (await file.exists()) {
+          await file.delete();
+        }
+        await tempFile.rename(file.path);
+        fileSaved = true;
+      }
+    } catch (_) {}
+
+    if (!fileSaved) {
+      try {
+        await _storage.write(
+          key: _cachedStudentsKey,
+          value: jsonEncode(students.map((s) => s.toJson()).toList()),
+        );
+      } catch (_) {}
+    }
     unawaited(CallerIdService.syncStudents(students));
   }
 
@@ -3563,6 +3610,54 @@ class Student {
     'attempts': attempts.map((attempt) => attempt.toJson()).toList(),
     'note': note,
   };
+
+  static final _searchIndexExpando = Expando<String>();
+  static final _addedDateExpando = Expando<DateTime>();
+  static final _nextCallDateExpando = Expando<DateTime>();
+
+  String get searchIndex {
+    final cached = _searchIndexExpando[this];
+    if (cached != null) return cached;
+    final sb = StringBuffer();
+    sb.write(name.toLowerCase());
+    sb.write(' ');
+    sb.write(phone.toLowerCase());
+    sb.write(' ');
+    sb.write(location.toLowerCase());
+    sb.write(' ');
+    sb.write(callStatus.toLowerCase());
+    sb.write(' ');
+    sb.write(comment.toLowerCase());
+    for (final c in commentHistory) {
+      sb.write(' ');
+      sb.write(c.toLowerCase());
+    }
+    for (final a in attempts) {
+      sb.write(' ');
+      sb.write(a.status.toLowerCase());
+      sb.write(' ');
+      sb.write(a.comment.toLowerCase());
+    }
+    final result = sb.toString();
+    _searchIndexExpando[this] = result;
+    return result;
+  }
+
+  DateTime? get parsedAddedDate {
+    final cached = _addedDateExpando[this];
+    if (cached != null) return cached;
+    final parsed = tryParseDate(addedDate);
+    if (parsed != null) _addedDateExpando[this] = parsed;
+    return parsed;
+  }
+
+  DateTime? get parsedNextCallDate {
+    final cached = _nextCallDateExpando[this];
+    if (cached != null) return cached;
+    final parsed = tryParseDate(nextCallDateTime);
+    if (parsed != null) _nextCallDateExpando[this] = parsed;
+    return parsed;
+  }
 }
 
 class QueuedSheetAction {
@@ -5803,22 +5898,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   List<Student> get _filteredStudents {
     final query = _query.trim().toLowerCase();
     final statusFilter = _statusFilter?.trim().toLowerCase();
-    final filtered = _students
-        .where(
-          (student) =>
-              (!isFinalLeadStatus(student.callStatus) ||
-                  (statusFilter != null &&
-                      statusFilter ==
-                          student.callStatus.trim().toLowerCase())) &&
-              _matchesLeadFilter(student) &&
-              (query.isEmpty || _matchesSearch(student, query)),
-        )
-        .toList();
-    filtered.sort(
-      _leadFilter == _LeadFilter.todayFollowUp
-          ? _compareStudentsByFollowUpDate
-          : _compareStudentsByNewestDate,
-    );
+    final filtered = <Student>[];
+
+    for (var i = 0; i < _students.length; i++) {
+      final student = _students[i];
+      if (isFinalLeadStatus(student.callStatus) &&
+          (statusFilter == null ||
+              statusFilter != student.callStatus.trim().toLowerCase())) {
+        continue;
+      }
+      if (!_matchesLeadFilter(student)) continue;
+      if (query.isNotEmpty && !_matchesSearch(student, query)) continue;
+      filtered.add(student);
+    }
+
+    if (filtered.length > 1) {
+      final indexMap = {
+        for (var i = 0; i < filtered.length; i++) filtered[i]: i,
+      };
+      filtered.sort(
+        _leadFilter == _LeadFilter.todayFollowUp
+            ? (a, b) => _compareStudentsByFollowUpDate(a, b, indexMap)
+            : (a, b) => _compareStudentsByNewestDate(a, b, indexMap),
+      );
+    }
     return filtered;
   }
 
@@ -5877,32 +5980,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
-  int _compareStudentsByFollowUpDate(Student left, Student right) {
-    final leftDate = tryParseDate(left.nextCallDateTime);
-    final rightDate = tryParseDate(right.nextCallDateTime);
+  int _compareStudentsByFollowUpDate(
+    Student left,
+    Student right, [
+    Map<Student, int>? indexMap,
+  ]) {
+    final leftDate = left.parsedNextCallDate;
+    final rightDate = right.parsedNextCallDate;
     if (leftDate == null || rightDate == null) {
       if (leftDate == null && rightDate != null) return 1;
       if (rightDate == null && leftDate != null) return -1;
-      return _students.indexOf(left).compareTo(_students.indexOf(right));
+      final leftIdx = indexMap?[left] ?? _students.indexOf(left);
+      final rightIdx = indexMap?[right] ?? _students.indexOf(right);
+      return leftIdx.compareTo(rightIdx);
     }
     final dateComparison = leftDate.compareTo(rightDate);
-    return dateComparison != 0
-        ? dateComparison
-        : _students.indexOf(left).compareTo(_students.indexOf(right));
+    if (dateComparison != 0) return dateComparison;
+    final leftIdx = indexMap?[left] ?? _students.indexOf(left);
+    final rightIdx = indexMap?[right] ?? _students.indexOf(right);
+    return leftIdx.compareTo(rightIdx);
   }
 
-  int _compareStudentsByNewestDate(Student left, Student right) {
-    final leftDate = tryParseDate(left.addedDate);
-    final rightDate = tryParseDate(right.addedDate);
+  int _compareStudentsByNewestDate(
+    Student left,
+    Student right, [
+    Map<Student, int>? indexMap,
+  ]) {
+    final leftDate = left.parsedAddedDate;
+    final rightDate = right.parsedAddedDate;
     if (leftDate == null || rightDate == null) {
       if (leftDate == null && rightDate != null) return 1;
       if (rightDate == null && leftDate != null) return -1;
-      return _students.indexOf(left).compareTo(_students.indexOf(right));
+      final leftIdx = indexMap?[left] ?? _students.indexOf(left);
+      final rightIdx = indexMap?[right] ?? _students.indexOf(right);
+      return leftIdx.compareTo(rightIdx);
     }
     final dateComparison = rightDate.compareTo(leftDate);
-    return dateComparison != 0
-        ? dateComparison
-        : _students.indexOf(left).compareTo(_students.indexOf(right));
+    if (dateComparison != 0) return dateComparison;
+    final leftIdx = indexMap?[left] ?? _students.indexOf(left);
+    final rightIdx = indexMap?[right] ?? _students.indexOf(right);
+    return leftIdx.compareTo(rightIdx);
   }
 
   bool _matchesLeadFilter(Student student) {
@@ -5915,7 +6032,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final from = _dateFrom;
     final to = _dateTo;
     if (from != null || to != null) {
-      final addedDate = tryParseDate(student.addedDate);
+      final addedDate = student.parsedAddedDate;
       if (addedDate == null) return false;
       final day = DateTime(addedDate.year, addedDate.month, addedDate.day);
       if (from != null && day.isBefore(_dateOnly(from))) return false;
@@ -5928,7 +6045,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       case _LeadFilter.newLeads:
         return student.callStatus.trim().toLowerCase() == 'pending';
       case _LeadFilter.todayFollowUp:
-        final nextCall = tryParseDate(student.nextCallDateTime);
+        final nextCall = student.parsedNextCallDate;
         final today = DateTime.now();
         if (nextCall == null ||
             !nextCall.isBefore(
@@ -5944,18 +6061,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   bool _matchesSearch(Student student, String query) {
-    final searchableText = <String>[
-      student.name,
-      student.phone,
-      student.location,
-      student.callStatus,
-      student.comment,
-      ...student.commentHistory,
-      ...student.attempts.expand(
-        (attempt) => [attempt.status, attempt.comment],
-      ),
-    ];
-    return searchableText.any((value) => value.toLowerCase().contains(query));
+    return student.searchIndex.contains(query);
   }
 
   Future<void> _addStudent() async {
