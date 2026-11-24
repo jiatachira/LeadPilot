@@ -1191,6 +1191,8 @@ void main() {
     expect(find.text('Not Potential Lead'), findsNothing);
 
     await openSettings(tester);
+    await tester.tap(find.text('Data'));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Lead reports'));
     await tester.tap(find.text('Lead reports'));
     await tester.pumpAndSettle();
@@ -1375,6 +1377,8 @@ void main() {
     await tester.pumpAndSettle();
 
     await openSettings(tester);
+    await tester.tap(find.text('Data'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Filter by date and call status'));
     await tester.pumpAndSettle();
     await tester.tap(find.byType(DropdownButtonFormField<String>).last);
@@ -1433,6 +1437,8 @@ void main() {
     await tester.tap(find.text('New'));
     await tester.pumpAndSettle();
     await openSettings(tester);
+    await tester.tap(find.text('Data'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Save contacts'));
     await tester.pumpAndSettle();
 
@@ -1600,6 +1606,10 @@ void main() {
     await tester.pumpAndSettle();
 
     await openSettings(tester);
+    await tester.ensureVisible(find.text('Appearance'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Appearance'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(DropdownButtonFormField<ThemeMode>));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Dark').last);
@@ -1609,7 +1619,9 @@ void main() {
       tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
       ThemeMode.dark,
     );
-    final searchField = tester.widget<TextField>(find.byType(TextField).first);
+    final searchField = tester.widget<TextField>(
+      find.byType(TextField, skipOffstage: false).first,
+    );
     final hintColor = searchField.decoration!.hintStyle!.color!;
     expect(hintColor.computeLuminance(), greaterThan(0.3));
     expect(
@@ -2007,6 +2019,8 @@ void main() {
       await tester.pumpAndSettle();
 
       await openSettings(tester);
+      await tester.tap(find.text('Messages'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('WhatsApp & SMS templates'));
       await tester.pumpAndSettle();
 
@@ -2326,15 +2340,15 @@ void main() {
       await tester.pumpAndSettle();
 
       await openSettings(tester);
-
-      final testPopupFinder = find.text('Preview / Test Popup');
-      await tester.ensureVisible(testPopupFinder);
+      await tester.tap(find.text('Caller ID'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Caller ID'), findsOneWidget);
       expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
-      expect(testPopupFinder, findsOneWidget);
-      expect(find.text('LeadPilot v1.28.0'), findsOneWidget);
+
+      await tester.tap(find.text('Advanced'));
+      await tester.pumpAndSettle();
+
+      final testPopupFinder = find.text('Preview / Test Popup');
 
       await tester.tap(testPopupFinder);
       await tester.pumpAndSettle();
@@ -3726,12 +3740,18 @@ void main() {
 
       await tester.tap(find.text('Open Settings'));
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.text('Updates & About'), 100);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Updates & About'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Updates & About'));
+      await tester.pumpAndSettle();
 
       final checkBtn = find.byKey(const Key('check_updates_button'));
       await tester.ensureVisible(checkBtn);
       await tester.pumpAndSettle();
 
-      expect(find.text('App Updates'), findsOneWidget);
+      expect(find.text('Updates & About'), findsOneWidget);
       expect(find.text('Check for Updates'), findsOneWidget);
       expect(find.text('Auto-check on Startup'), findsOneWidget);
 
@@ -4187,6 +4207,8 @@ void main() {
       await tester.pumpAndSettle();
 
       await openSettings(tester);
+      await tester.tap(find.text('Calling'));
+      await tester.pumpAndSettle();
 
       final directCallingFinder = find.text('Direct In-App Calling');
       await tester.ensureVisible(directCallingFinder);
@@ -4305,6 +4327,9 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Calling'));
     await tester.pumpAndSettle();
 
     expect(find.text('Direct In-App Calling'), findsOneWidget);

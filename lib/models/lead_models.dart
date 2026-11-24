@@ -217,16 +217,6 @@ class _LeadFilterSelection {
   final DateTime? dateTo;
 }
 
-enum _SettingsAction {
-  sheetSync,
-  filters,
-  export,
-  reports,
-  saveContacts,
-  whatsAppTemplates,
-  geminiAi,
-  companyDescription,
-}
 
 enum _StudentCardAction { edit, selectMultiple }
 

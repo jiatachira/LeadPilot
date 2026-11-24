@@ -50,6 +50,7 @@ part 'widgets/dialogs/lead_filter_sheet.dart';
 part 'widgets/student_card.dart';
 part 'widgets/voice_ai_remark_controls.dart';
 part 'screens/edit_details_screen.dart';
+part 'screens/settings_screen.dart';
 part 'widgets/dialogs/edit_student_sheet.dart';
 part 'widgets/dialogs/add_student_sheet.dart';
 part 'widgets/dialogs/lead_reports_sheet.dart';

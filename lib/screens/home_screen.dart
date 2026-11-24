@@ -706,125 +706,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openSettings() async {
-    final action = await showModalBottomSheet<_SettingsAction>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => SettingsHubSheet(
-        themeMode: widget.themeMode,
-        onThemeModeChanged: _changeThemeMode,
-        isSheetConnected: widget.sheetConfig.isNotEmpty,
-        hasActiveFilters: _hasActiveFilters,
-        biometricEnabled: widget.biometricEnabled,
-        onBiometricChanged: widget.onBiometricChanged,
-        students: _students,
-        settingsStore: _settingsStore,
-        updateService: _updateService,
-      ),
-    );
-    if (!mounted || action == null) return;
-    switch (action) {
-      case _SettingsAction.sheetSync:
-        await _openSheetSyncSettings();
-        break;
-      case _SettingsAction.filters:
-        await _openLeadFilters();
-        break;
-      case _SettingsAction.export:
-        await _exportStudentsToCsv(_filteredStudents);
-        break;
-      case _SettingsAction.reports:
-        await _openLeadReports();
-        break;
-      case _SettingsAction.saveContacts:
-        await _saveVisibleContacts();
-        break;
-      case _SettingsAction.whatsAppTemplates:
-        await _openWhatsAppTemplatesSettings();
-        break;
-      case _SettingsAction.geminiAi:
-        await _openGeminiAiSettings();
-        break;
-      case _SettingsAction.companyDescription:
-        await _openCompanyDescriptionDialog();
-        break;
-    }
-  }
-
-  Future<void> _openCompanyDescriptionDialog() async {
-    final current = await _settingsStore.readCompanyDescription();
-    if (!mounted) return;
-    final controller = TextEditingController(text: current);
-    final updated = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.business_rounded, color: Color(0xFF8B5CF6)),
-            SizedBox(width: 8),
-            Text('Company Description'),
-          ],
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SettingsScreen(
+          themeMode: widget.themeMode,
+          onThemeModeChanged: _changeThemeMode,
+          isSheetConnected: widget.sheetConfig.isNotEmpty,
+          sheetUrl: widget.sheetConfig,
+          sheetName: widget.sheetName,
+          savedSheets: widget.linkedSheets,
+          onSaveSheetConfig: (savedConfig) async {
+            await widget.onSaveSheetConfig(savedConfig);
+            if (mounted) {
+              await _syncWithGoogleSheet(url: savedConfig.url);
+            }
+          },
+          hasActiveFilters: _hasActiveFilters,
+          biometricEnabled: widget.biometricEnabled,
+          onBiometricChanged: widget.onBiometricChanged,
+          students: _students,
+          filteredStudents: _filteredStudents,
+          settingsStore: _settingsStore,
+          updateService: _updateService,
+          onOpenLeadFilters: _openLeadFilters,
+          onExportCsv: () => _exportStudentsToCsv(_filteredStudents),
+          onOpenLeadReports: _openLeadReports,
+          onSaveVisibleContacts: _saveVisibleContacts,
         ),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'AI uses this description to represent your institute (LNBTI) in generated follow-up messages politely without overwhelming details.',
-                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                    ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: controller,
-                minLines: 3,
-                maxLines: 6,
-                decoration: InputDecoration(
-                  labelText: 'Description about your company',
-                  hintText: 'Enter institute details...',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    icon: const Icon(Icons.restart_alt_rounded),
-                    tooltip: 'Reset to LNBTI default',
-                    onPressed: () => controller.text = _defaultCompanyDescription,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF8B5CF6),
-            ),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    if (updated != null && mounted) {
-      await _settingsStore.saveCompanyDescription(updated);
-      if (!mounted) return;
-      _showMessage('Company description saved for AI messaging.');
-    }
-  }
-
-  Future<void> _openGeminiAiSettings() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => ManageGeminiAiSheet(
-        settingsStore: _settingsStore,
       ),
     );
   }
@@ -838,30 +746,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         settingsStore: _settingsStore,
       ),
     );
-  }
-
-  Future<void> _openSheetSyncSettings() async {
-    final savedConfig = await showModalBottomSheet<LinkedSheet>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _SheetSettingsSheet(
-        initialUrl: widget.sheetConfig,
-        initialName: widget.sheetName,
-        savedSheets: widget.linkedSheets,
-        isConnected: _hasSynced,
-      ),
-    );
-    if (savedConfig == null || !mounted) return;
-
-    try {
-      await widget.onSaveSheetConfig(savedConfig);
-    } on Exception catch (error) {
-      if (mounted) _showMessage('Could not save this linked sheet: $error');
-      return;
-    }
-    if (!mounted) return;
-    await _syncWithGoogleSheet(url: savedConfig.url);
   }
 
   Future<void> _openLeadFilters() async {
