@@ -377,7 +377,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return leftIdx.compareTo(rightIdx);
   }
 
-  bool _matchesLeadFilter(Student student) {
+  bool _matchesCategory(Student student, _LeadFilter filter) {
     final normalizedStatus = student.callStatus.trim().toLowerCase();
     if (_statusFilter != null &&
         normalizedStatus != _statusFilter!.toLowerCase()) {
@@ -394,7 +394,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (to != null && day.isAfter(_dateOnly(to))) return false;
     }
 
-    switch (_leadFilter) {
+    switch (filter) {
       case _LeadFilter.all:
         return true;
       case _LeadFilter.newLeads:
@@ -413,6 +413,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           return attemptedAt != null && !attemptedAt.isBefore(nextCall);
         });
     }
+  }
+
+  bool _matchesLeadFilter(Student student) =>
+      _matchesCategory(student, _leadFilter);
+
+  int _countForCategory(_LeadFilter filter) {
+    final statusFilter = _statusFilter?.trim().toLowerCase();
+    final query = _query.trim().toLowerCase();
+    var count = 0;
+    for (var i = 0; i < _students.length; i++) {
+      final student = _students[i];
+      if (isFinalLeadStatus(student.callStatus) &&
+          (statusFilter == null ||
+              statusFilter != student.callStatus.trim().toLowerCase())) {
+        continue;
+      }
+      if (!_matchesCategory(student, filter)) continue;
+      if (query.isNotEmpty && !_matchesSearch(student, query)) continue;
+      count++;
+    }
+    return count;
   }
 
   bool _matchesSearch(Student student, String query) {
@@ -1039,10 +1060,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Widget _leadCountBadge(int count, {required bool isSelected}) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+      decoration: BoxDecoration(
+        color: isSelected
+            ? (isDark
+                ? theme.colorScheme.primary.withValues(alpha: 0.25)
+                : theme.colorScheme.primary.withValues(alpha: 0.15))
+            : (isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.06)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        '$count',
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: isSelected
+              ? theme.colorScheme.primary
+              : theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final students = _filteredStudents;
     final selectedStudents = _selectedStudents;
+    final allCount = _countForCategory(_LeadFilter.all);
+    final newCount = _countForCategory(_LeadFilter.newLeads);
+    final todayCount = _countForCategory(_LeadFilter.todayFollowUp);
 
     return Scaffold(
       appBar: AppBar(
@@ -1228,18 +1281,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       SizedBox(
                         width: double.infinity,
                         child: SegmentedButton<_LeadFilter>(
-                          segments: const [
+                          segments: [
                             ButtonSegment(
                               value: _LeadFilter.all,
-                              label: Text('All'),
+                              label: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text('All'),
+                                  const SizedBox(width: 6),
+                                  _leadCountBadge(
+                                    allCount,
+                                    isSelected: _leadFilter == _LeadFilter.all,
+                                  ),
+                                ],
+                              ),
                             ),
                             ButtonSegment(
                               value: _LeadFilter.newLeads,
-                              label: Text('New'),
+                              label: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text('New'),
+                                  const SizedBox(width: 6),
+                                  _leadCountBadge(
+                                    newCount,
+                                    isSelected:
+                                        _leadFilter == _LeadFilter.newLeads,
+                                  ),
+                                ],
+                              ),
                             ),
                             ButtonSegment(
                               value: _LeadFilter.todayFollowUp,
-                              label: Text('Today'),
+                              label: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text('Today'),
+                                  const SizedBox(width: 6),
+                                  _leadCountBadge(
+                                    todayCount,
+                                    isSelected:
+                                        _leadFilter == _LeadFilter.todayFollowUp,
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                           selected: {_leadFilter},

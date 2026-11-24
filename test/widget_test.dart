@@ -1970,7 +1970,13 @@ void main() {
         'Offline call notes',
       );
       expect(find.byIcon(Icons.cloud_upload_outlined), findsOneWidget);
-      expect(find.text('1'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('sync-appbar-button')),
+          matching: find.text('1'),
+        ),
+        findsOneWidget,
+      );
 
       shouldFailPost = false;
       await tester.tap(find.byKey(const ValueKey('sync-appbar-button')));
@@ -4408,6 +4414,74 @@ void main() {
       expect(store, isNotNull);
       const student = Student(name: 'Enterprise Lead', phone: '0771234567');
       expect(student.name, 'Enterprise Lead');
+    },
+  );
+
+  testWidgets(
+    'Segmented button displays dynamic counts for All, New, and Today',
+    (tester) async {
+      final today = DateTime.now();
+      final todayStr =
+          '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')} 14:00';
+      final settingsStore = MemoryAppSettingsStore()
+        ..pin = '2580'
+        ..sheetConfig = 'https://script.google.com/macros/s/test/exec';
+      final client = MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'students': [
+              {
+                'name': 'Lead 1',
+                'contact': '0711111111',
+                'callStatus': 'Pending',
+              },
+              {
+                'name': 'Lead 2',
+                'contact': '0722222222',
+                'callStatus': 'Follow-up',
+                'nextCallDateTime': todayStr,
+              },
+              {
+                'name': 'Lead 3',
+                'contact': '0733333333',
+                'callStatus': 'Interested',
+              },
+            ],
+          }),
+          200,
+        ),
+      );
+
+      await tester.pumpWidget(
+        testApp(httpClient: client, settingsStore: settingsStore),
+      );
+      await tester.pumpAndSettle();
+      await enterPin(tester, '2580');
+      await tester.pumpAndSettle();
+
+      final segmentedButton =
+          find.byWidgetPredicate((w) => w is SegmentedButton);
+      expect(segmentedButton, findsOneWidget);
+      expect(
+        find.descendant(of: segmentedButton, matching: find.text('All')),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(of: segmentedButton, matching: find.text('3')),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(of: segmentedButton, matching: find.text('New')),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(of: segmentedButton, matching: find.text('Today')),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(of: segmentedButton, matching: find.text('1')),
+        findsWidgets,
+      );
     },
   );
 }
