@@ -22,7 +22,7 @@ const _navy = Color(0xFF142B4A);
 const _green = Color(0xFF159A76);
 const _canvas = Color(0xFFF4F7FA);
 const _muted = Color(0xFF748194);
-const String kAppVersion = '1.24.0';
+const String kAppVersion = '1.25.0';
 const _defaultWhatsAppCountryCode = '94';
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 final _pendingReminderPopups = <Student>[];
@@ -6672,7 +6672,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       label: Text(label),
       selected: selected,
       showCheckmark: false,
-      onSelected: (_) => setState(() => _leadFilter = filter),
+      onSelected: (_) {
+        HapticFeedback.selectionClick();
+        setState(() => _leadFilter = filter);
+      },
       selectedColor: _navy,
       backgroundColor: Theme.of(context).colorScheme.surface,
       side: BorderSide(
@@ -8754,10 +8757,10 @@ class StudentCard extends StatelessWidget {
       _ => Theme.of(context).colorScheme.onSurfaceVariant,
     };
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 1.5,
-      shadowColor: _navy.withValues(alpha: 0.07),
+    final cardWidget = Card(
+      margin: EdgeInsets.zero,
+      elevation: 2,
+      shadowColor: _navy.withValues(alpha: isDark ? 0.25 : 0.07),
       color: Theme.of(context).colorScheme.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
@@ -9036,6 +9039,87 @@ class StudentCard extends StatelessWidget {
         ),
       ),
     );
+
+    if (isSelectionMode) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: cardWidget,
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Dismissible(
+        key: ValueKey(
+          'swipe_${student.phone}_${student.name}_${student.addedDate}',
+        ),
+        direction: DismissDirection.horizontal,
+        confirmDismiss: (direction) async {
+          if (direction == DismissDirection.startToEnd) {
+            unawaited(HapticFeedback.mediumImpact());
+            onCall();
+          } else if (direction == DismissDirection.endToStart) {
+            unawaited(HapticFeedback.mediumImpact());
+            onWhatsApp();
+          }
+          return false;
+        },
+        background: Container(
+          decoration: BoxDecoration(
+            color: _green,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          alignment: Alignment.centerLeft,
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          child: const Row(
+            children: [
+              Icon(
+                Icons.phone_forwarded_rounded,
+                color: Colors.white,
+                size: 24,
+              ),
+              SizedBox(width: 8),
+              Text(
+                'Direct Call',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+        ),
+        secondaryBackground: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF25D366),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Text(
+                'WhatsApp',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
+              ),
+              SizedBox(width: 8),
+              FaIcon(
+                FontAwesomeIcons.whatsapp,
+                color: Colors.white,
+                size: 24,
+              ),
+            ],
+          ),
+        ),
+        child: cardWidget,
+      ),
+    );
   }
 }
 
@@ -9220,7 +9304,10 @@ class _QuickActionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return IconButton(
       tooltip: tooltip,
-      onPressed: onPressed,
+      onPressed: () {
+        HapticFeedback.lightImpact();
+        onPressed();
+      },
       style: IconButton.styleFrom(
         backgroundColor: backgroundColor,
         foregroundColor: foregroundColor,

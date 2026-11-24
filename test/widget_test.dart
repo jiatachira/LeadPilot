@@ -2322,7 +2322,7 @@ void main() {
       expect(find.text('Caller ID'), findsOneWidget);
       expect(find.text('Incoming Caller ID Popup'), findsOneWidget);
       expect(testPopupFinder, findsOneWidget);
-      expect(find.text('LeadPilot v1.24.0'), findsOneWidget);
+      expect(find.text('LeadPilot v1.25.0'), findsOneWidget);
 
       await tester.tap(testPopupFinder);
       await tester.pumpAndSettle();
@@ -3660,7 +3660,7 @@ void main() {
       await tester.tap(checkBtn);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
-      expect(find.text('LeadPilot is up to date (v1.24.0).'), findsOneWidget);
+      expect(find.text('LeadPilot is up to date (v1.25.0).'), findsOneWidget);
 
       // Toggle Auto-check
       final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
@@ -4236,4 +4236,43 @@ void main() {
     expect(find.text('Direct In-App Calling'), findsOneWidget);
     expect(find.text('Floating Call Head (1-Tap End Call)'), findsOneWidget);
   });
+
+  testWidgets(
+    'StudentCard swipe right triggers onCall and swipe left triggers onWhatsApp without removing card',
+    (tester) async {
+      bool callTriggered = false;
+      bool whatsAppTriggered = false;
+      const student = Student(name: 'Saman Silva', phone: '0771234567');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StudentCard(
+              student: student,
+              onTap: () {},
+              onLongPress: () {},
+              onCall: () => callTriggered = true,
+              onWhatsApp: () => whatsAppTriggered = true,
+              onSms: () {},
+              onNote: () {},
+              onSaveContact: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Swipe right (startToEnd) -> triggers onCall
+      await tester.drag(find.text('Saman Silva'), const Offset(500, 0));
+      await tester.pumpAndSettle();
+      expect(callTriggered, isTrue);
+      expect(find.text('Saman Silva'), findsOneWidget);
+
+      // Swipe left (endToStart) -> triggers onWhatsApp
+      await tester.drag(find.text('Saman Silva'), const Offset(-500, 0));
+      await tester.pumpAndSettle();
+      expect(whatsAppTriggered, isTrue);
+      expect(find.text('Saman Silva'), findsOneWidget);
+    },
+  );
 }
