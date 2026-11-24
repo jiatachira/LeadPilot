@@ -106,14 +106,18 @@ class _VoiceAiRemarkControlsState extends State<VoiceAiRemarkControls> {
     }
 
     final apiKey = await _settingsStore.readGeminiApiKey();
-    if (apiKey.trim().isEmpty) {
+    final groqApiKey = await _settingsStore.readGroqApiKey();
+    final aiProvider = await _settingsStore.readAiProvider();
+    final groqModel = await _settingsStore.readGroqModel();
+
+    if (apiKey.trim().isEmpty && groqApiKey.trim().isEmpty) {
       if (!mounted) return;
       final messenger = ScaffoldMessenger.maybeOf(context);
       messenger?.removeCurrentSnackBar();
       messenger?.showSnackBar(
         SnackBar(
           content: const Text(
-            'Gemini API key not configured. Please add your free key in Settings.',
+            'AI API key not configured. Please add your free Gemini or Groq key in Settings.',
           ),
           action: SnackBarAction(
             label: 'Settings',
@@ -144,6 +148,9 @@ class _VoiceAiRemarkControlsState extends State<VoiceAiRemarkControls> {
         apiKey: apiKey,
         rawRemark: rawRemark,
         model: model,
+        provider: aiProvider,
+        groqApiKey: groqApiKey,
+        groqModel: groqModel,
       );
 
       if (!mounted) return;

@@ -530,7 +530,10 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
               ),
             ],
           ),
-          const Divider(height: 24),
+          const SizedBox(height: 8),
+          // Student details summary card
+          _buildStudentDetailsCard(context),
+          const Divider(height: 20),
           // Call status dropdown
           DropdownButtonFormField<String>(
             initialValue: _callStatus,
@@ -689,6 +692,185 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
                   borderRadius: BorderRadius.circular(16),
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStudentDetailsCard(BuildContext context) {
+    final theme = Theme.of(context);
+    final details = <Widget>[];
+
+    final examStr = [
+      _activeStudent.examType,
+      _activeStudent.examYear,
+    ].where((s) => s.trim().isNotEmpty).join(' ');
+
+    if (examStr.isNotEmpty) {
+      details.add(_buildDetailChip(
+        Icons.school_outlined,
+        examStr,
+        theme,
+      ));
+    }
+    if (_activeStudent.location.trim().isNotEmpty) {
+      details.add(_buildDetailChip(
+        Icons.location_on_outlined,
+        _activeStudent.location.trim(),
+        theme,
+      ));
+    }
+    if (_activeStudent.olEnglish.trim().isNotEmpty) {
+      details.add(_buildDetailChip(
+        Icons.translate_rounded,
+        'O/L Eng: ${_activeStudent.olEnglish.trim()}',
+        theme,
+      ));
+    }
+    if (_activeStudent.olMaths.trim().isNotEmpty) {
+      details.add(_buildDetailChip(
+        Icons.calculate_outlined,
+        'O/L Maths: ${_activeStudent.olMaths.trim()}',
+        theme,
+      ));
+    }
+    if (_activeStudent.whatsappNumber.trim().isNotEmpty) {
+      details.add(_buildDetailChip(
+        FontAwesomeIcons.whatsapp,
+        _activeStudent.whatsappNumber.trim(),
+        theme,
+        isFa: true,
+      ));
+    }
+    if (_activeStudent.source.trim().isNotEmpty) {
+      details.add(_buildDetailChip(
+        Icons.campaign_outlined,
+        'Source: ${_activeStudent.source.trim()}',
+        theme,
+      ));
+    }
+    if (_activeStudent.addedDate.trim().isNotEmpty) {
+      details.add(_buildDetailChip(
+        Icons.calendar_today_outlined,
+        'Added: ${_activeStudent.addedDate.trim()}',
+        theme,
+      ));
+    }
+
+    if (details.isEmpty) {
+      return Container(
+        margin: const EdgeInsets.only(top: 8, bottom: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.info_outline_rounded,
+              size: 15,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'No extra details added yet (Location, Exam, WhatsApp, etc.)',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 8, bottom: 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.assignment_ind_outlined,
+                size: 15,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Student Details',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: details,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailChip(
+    dynamic iconData,
+    String label,
+    ThemeData theme, {
+    bool isFa = false,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isFa)
+            const FaIcon(
+              FontAwesomeIcons.whatsapp,
+              size: 11,
+              color: Color(0xFF25D366),
+            )
+          else
+            Icon(
+              iconData as IconData,
+              size: 13,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: theme.colorScheme.onSurface,
             ),
           ),
         ],

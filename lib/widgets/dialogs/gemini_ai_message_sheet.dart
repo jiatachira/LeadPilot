@@ -100,7 +100,10 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
   }
 
   Future<void> _generateMessage() async {
-    if (_apiKey.isEmpty) return;
+    final groqKey = await widget.settingsStore.readGroqApiKey();
+    final provider = await widget.settingsStore.readAiProvider();
+    final groqModel = await widget.settingsStore.readGroqModel();
+    if (_apiKey.isEmpty && groqKey.isEmpty) return;
     setState(() {
       _isGenerating = true;
       _errorMessage = null;
@@ -116,6 +119,9 @@ class _GeminiAiMessageSheetState extends State<GeminiAiMessageSheet> {
         language: _selectedLanguage,
         customInstructions: _instructionController.text.trim(),
         companyDescription: companyDesc,
+        provider: provider,
+        groqApiKey: groqKey,
+        groqModel: groqModel,
       );
       if (!mounted) return;
       setState(() {

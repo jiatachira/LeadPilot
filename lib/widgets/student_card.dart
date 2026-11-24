@@ -182,13 +182,32 @@ class StudentCard extends StatelessWidget {
                   ),
                 ),
                 if (!isSelectionMode) ...[
-                  const SizedBox(width: 8),
+                  IconButton(
+                    tooltip: 'Call history',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onNote,
+                    icon: Icon(
+                      Icons.history_rounded,
+                      size: 20,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'WhatsApp chat',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onWhatsApp,
+                    icon: const FaIcon(
+                      FontAwesomeIcons.whatsapp,
+                      size: 20,
+                      color: Color(0xFF25D366),
+                    ),
+                  ),
                   IconButton.filled(
                     tooltip: 'Call student',
                     style: IconButton.styleFrom(
                       backgroundColor: _green,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(9),
                     ),
                     onPressed: onCall,
                     icon: const Icon(Icons.call_rounded, size: 20),
@@ -217,6 +236,16 @@ class StudentCard extends StatelessWidget {
                     },
                     itemBuilder: (context) => [
                       const PopupMenuItem(
+                        value: 'history',
+                        child: Row(
+                          children: [
+                            Icon(Icons.history_rounded, size: 18),
+                            SizedBox(width: 12),
+                            Text('History'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
                         value: 'whatsapp',
                         child: Row(
                           children: [
@@ -237,16 +266,6 @@ class StudentCard extends StatelessWidget {
                             Icon(Icons.sms_outlined, size: 18),
                             SizedBox(width: 12),
                             Text('SMS'),
-                          ],
-                        ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'history',
-                        child: Row(
-                          children: [
-                            Icon(Icons.history_rounded, size: 18),
-                            SizedBox(width: 12),
-                            Text('History'),
                           ],
                         ),
                       ),

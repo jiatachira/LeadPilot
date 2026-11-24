@@ -109,6 +109,18 @@ abstract interface class AppSettingsStore {
 
   Future<void> saveCompanyDescription(String description);
 
+  Future<String> readAiProvider();
+
+  Future<void> saveAiProvider(String provider);
+
+  Future<String> readGroqApiKey();
+
+  Future<void> saveGroqApiKey(String key);
+
+  Future<String> readGroqModel();
+
+  Future<void> saveGroqModel(String model);
+
   Future<bool> readAutoCheckUpdates();
 
   Future<void> saveAutoCheckUpdates(bool enabled);

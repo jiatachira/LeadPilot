@@ -15,6 +15,9 @@ class SecureAppSettingsStore implements AppSettingsStore {
   static const _whatsAppTemplatesKey = 'student_call_whatsapp_templates';
   static const _geminiApiKeyKey = 'student_call_gemini_api_key';
   static const _geminiModelKey = 'student_call_gemini_model';
+  static const _aiProviderKey = 'student_call_ai_provider';
+  static const _groqApiKeyKey = 'student_call_groq_api_key';
+  static const _groqModelKey = 'student_call_groq_model';
   static const _companyDescriptionKey = 'student_call_company_description';
   static const _autoCheckUpdatesKey = 'student_call_auto_check_updates';
   static const _autoLogCallDurationKey = 'student_call_auto_log_call_duration';
@@ -224,6 +227,30 @@ class SecureAppSettingsStore implements AppSettingsStore {
       );
 
   @override
+  Future<String> readAiProvider() async =>
+      await _storage.read(key: _aiProviderKey) ?? 'gemini';
+
+  @override
+  Future<void> saveAiProvider(String provider) =>
+      _storage.write(key: _aiProviderKey, value: provider.trim());
+
+  @override
+  Future<String> readGroqApiKey() async =>
+      await _storage.read(key: _groqApiKeyKey) ?? '';
+
+  @override
+  Future<void> saveGroqApiKey(String key) =>
+      _storage.write(key: _groqApiKeyKey, value: key.trim());
+
+  @override
+  Future<String> readGroqModel() async =>
+      await _storage.read(key: _groqModelKey) ?? 'llama-3.3-70b-versatile';
+
+  @override
+  Future<void> saveGroqModel(String model) =>
+      _storage.write(key: _groqModelKey, value: model.trim());
+
+  @override
   Future<bool> readAutoCheckUpdates() async {
     final value = await _storage.read(key: _autoCheckUpdatesKey);
     return value != 'false';
@@ -418,6 +445,34 @@ class MemoryAppSettingsStore implements AppSettingsStore {
     companyDescription = description.trim().isEmpty
         ? _defaultCompanyDescription
         : description.trim();
+  }
+
+  String aiProvider = 'gemini';
+  String groqApiKey = '';
+  String groqModel = 'llama-3.3-70b-versatile';
+
+  @override
+  Future<String> readAiProvider() async => aiProvider;
+
+  @override
+  Future<void> saveAiProvider(String provider) async {
+    aiProvider = provider.trim();
+  }
+
+  @override
+  Future<String> readGroqApiKey() async => groqApiKey;
+
+  @override
+  Future<void> saveGroqApiKey(String key) async {
+    groqApiKey = key.trim();
+  }
+
+  @override
+  Future<String> readGroqModel() async => groqModel;
+
+  @override
+  Future<void> saveGroqModel(String model) async {
+    groqModel = model.trim();
   }
 
   bool autoCheckUpdates = true;

@@ -2524,7 +2524,7 @@ void main() {
       await tester.tap(find.byTooltip('More actions'));
       await tester.pumpAndSettle();
       expect(find.text('History'), findsOneWidget);
-      expect(find.byIcon(Icons.history_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.history_rounded), findsWidgets);
     },
   );
 
@@ -4482,6 +4482,152 @@ void main() {
         find.descendant(of: segmentedButton, matching: find.text('1')),
         findsWidgets,
       );
+    },
+  );
+
+  testWidgets(
+    'StudentCard has direct 1-tap WhatsApp and Call buttons on card',
+    (tester) async {
+      bool callTapped = false;
+      bool waTapped = false;
+      bool historyTapped = false;
+
+      const student = Student(name: 'Quick Lead', phone: '0719876543');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StudentCard(
+              student: student,
+              onTap: () {},
+              onLongPress: () {},
+              onCall: () => callTapped = true,
+              onWhatsApp: () => waTapped = true,
+              onSms: () {},
+              onNote: () => historyTapped = true,
+              onSaveContact: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip('Call student'), findsOneWidget);
+      expect(find.byTooltip('WhatsApp chat'), findsOneWidget);
+      expect(find.byTooltip('Call history'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Call student'));
+      expect(callTapped, isTrue);
+
+      await tester.tap(find.byTooltip('WhatsApp chat'));
+      expect(waTapped, isTrue);
+
+      await tester.tap(find.byTooltip('Call history'));
+      expect(historyTapped, isTrue);
+    },
+  );
+
+  testWidgets(
+    'EditStudentSheet displays student details summary card on log call screen',
+    (tester) async {
+      const student = Student(
+        name: 'Kasun Perera',
+        phone: '0771234567',
+        location: 'Kandy',
+        examType: 'A/L',
+        examYear: '2025',
+        olEnglish: 'A',
+        olMaths: 'B',
+        whatsappNumber: '0779998888',
+        source: 'Facebook Ad',
+      );
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: EditStudentSheet(
+              student: student,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Student Details'), findsOneWidget);
+      expect(find.text('A/L 2025'), findsOneWidget);
+      expect(find.text('Kandy'), findsOneWidget);
+      expect(find.text('O/L Eng: A'), findsOneWidget);
+      expect(find.text('O/L Maths: B'), findsOneWidget);
+      expect(find.text('0779998888'), findsOneWidget);
+      expect(find.text('Source: Facebook Ad'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'ManageGeminiAiSheet switches to Groq provider and allows configuring Groq API key',
+    (tester) async {
+      final store = MemoryAppSettingsStore();
+      final mockClient = MockClient((request) async {
+        if (request.url.host.contains('groq.com')) {
+          return http.Response(
+            jsonEncode({
+              'choices': [
+                {
+                  'message': {'content': 'OK'}
+                }
+              ]
+            }),
+            200,
+          );
+        }
+        return http.Response('Not found', 404);
+      });
+      final service = GeminiService(client: mockClient);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ManageGeminiAiSheet(
+              settingsStore: store,
+              geminiService: service,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Tap Groq Cloud (Free) tab
+      await tester.tap(find.text('Groq Cloud (Free)'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Ultra-Fast Groq Cloud (Free)'), findsOneWidget);
+      expect(find.text('Selected Groq Model'), findsOneWidget);
+
+      // Enter key
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Groq API Key'),
+        'gsk_test1234567890abcdef',
+      );
+      await tester.pumpAndSettle();
+
+      // Test connection
+      final testFinder = find.text('Test Key');
+      await tester.ensureVisible(testFinder);
+      await tester.tap(testFinder);
+      await tester.pumpAndSettle();
+
+      final matches = find.byType(SelectableText);
+      expect(matches, findsOneWidget);
+      expect(find.textContaining('Connected to Groq Cloud'), findsOneWidget);
+
+      // Save Key
+      final saveFinder = find.text('Save Key');
+      await tester.ensureVisible(saveFinder);
+      await tester.tap(saveFinder);
+      await tester.pumpAndSettle();
+
+      expect(await store.readAiProvider(), 'groq');
+      expect(await store.readGroqApiKey(), 'gsk_test1234567890abcdef');
     },
   );
 }

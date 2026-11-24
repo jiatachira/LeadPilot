@@ -60,6 +60,36 @@ class GeminiService {
     'gemini-1.5-pro',
   ];
 
+  static const List<String> candidateGroqModels = [
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant',
+    'mixtral-8x7b-32768',
+    'gemma2-9b-it',
+  ];
+
+  static const List<GeminiModelInfo> defaultGroqModels = [
+    GeminiModelInfo(
+      id: 'llama-3.3-70b-versatile',
+      displayName: 'Llama 3.3 70B (Recommended - Smart & Free)',
+      description: 'Meta\'s top model with ultra-fast Groq LPU inference',
+    ),
+    GeminiModelInfo(
+      id: 'llama-3.1-8b-instant',
+      displayName: 'Llama 3.1 8B Instant (Ultra Fast)',
+      description: 'Lightweight model with instantaneous response speed',
+    ),
+    GeminiModelInfo(
+      id: 'mixtral-8x7b-32768',
+      displayName: 'Mixtral 8x7B (MoE Architecture)',
+      description: 'High context window with reliable structured generation',
+    ),
+    GeminiModelInfo(
+      id: 'gemma2-9b-it',
+      displayName: 'Gemma 2 9B (Google on Groq)',
+      description: 'Google\'s Gemma 2 running on Groq hardware',
+    ),
+  ];
+
   static const List<GeminiModelInfo> defaultModels = [
     GeminiModelInfo(
       id: 'gemini-1.5-flash',
@@ -358,6 +388,206 @@ class GeminiService {
     );
   }
 
+  Future<String> generateWithGroq({
+    required String apiKey,
+    required String prompt,
+    String? model,
+    double temperature = 0.7,
+    int maxTokens = 500,
+  }) async {
+    final cleanKey = sanitizeApiKey(apiKey);
+    if (cleanKey.isEmpty) {
+      throw const GeminiException(
+        'Please configure a valid Groq API Key in Settings.',
+      );
+    }
+
+    final targetModel = (model != null && model.trim().isNotEmpty)
+        ? model.trim()
+        : 'llama-3.3-70b-versatile';
+
+    try {
+      final url = Uri.parse('https://api.groq.com/openai/v1/chat/completions');
+      final response = await _client.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $cleanKey',
+        },
+        body: jsonEncode({
+          'model': targetModel,
+          'messages': [
+            {'role': 'user', 'content': prompt}
+          ],
+          'temperature': temperature,
+          'max_tokens': maxTokens,
+        }),
+      ).timeout(const Duration(seconds: 25));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final choices = data['choices'] as List?;
+        if (choices != null && choices.isNotEmpty) {
+          final message = choices.first['message'] as Map?;
+          final content = message?['content'] as String?;
+          if (content != null && content.trim().isNotEmpty) {
+            return content.trim();
+          }
+        }
+        throw const GeminiException(
+          'Groq did not return any message content.',
+        );
+      }
+
+      String rawError = '';
+      try {
+        final errJson = jsonDecode(response.body);
+        if (errJson is Map && errJson['error'] is Map) {
+          rawError = (errJson['error']['message'] as String?) ?? '';
+        }
+      } catch (_) {}
+
+      if (response.statusCode == 401) {
+        throw const GeminiException(
+          'Invalid Groq API Key. Please verify your key from console.groq.com/keys.',
+        );
+      }
+
+      if (rawError.isNotEmpty) {
+        throw GeminiException(
+          'Groq API error (${response.statusCode}): $rawError',
+        );
+      }
+
+      throw GeminiException(
+        'Groq request failed with status ${response.statusCode}.',
+      );
+    } on SocketException {
+      throw const GeminiException(
+        'No internet connection. Please check your network connection.',
+      );
+    } on TimeoutException {
+      throw const GeminiException(
+        'Request timed out. Groq servers took too long to respond.',
+      );
+    } catch (e) {
+      if (e is GeminiException) rethrow;
+      throw GeminiException('Groq error: $e');
+    }
+  }
+
+  Future<GeminiTestResult> testGroqConnection(
+    String apiKey, {
+    String? model,
+  }) async {
+    final cleanKey = sanitizeApiKey(apiKey);
+    if (cleanKey.isEmpty) {
+      return const GeminiTestResult(
+        isSuccess: false,
+        message: 'Groq API Key is empty. Please enter your key.',
+        availableModels: defaultGroqModels,
+      );
+    }
+
+    final targetModel = (model != null && model.trim().isNotEmpty)
+        ? model.trim()
+        : 'llama-3.3-70b-versatile';
+
+    try {
+      final res = await generateWithGroq(
+        apiKey: cleanKey,
+        prompt: 'Say "OK" to test API connection.',
+        model: targetModel,
+        maxTokens: 10,
+      );
+      if (res.isNotEmpty) {
+        return GeminiTestResult(
+          isSuccess: true,
+          message:
+              '✅ Connection successful!\nConnected to Groq Cloud ($targetModel).\nUltra-fast LPU inference is ready to use.',
+          modelName: targetModel,
+          statusCode: 200,
+          availableModels: defaultGroqModels,
+        );
+      }
+      return const GeminiTestResult(
+        isSuccess: false,
+        message: 'Groq returned an empty response.',
+      );
+    } catch (e) {
+      return GeminiTestResult(
+        isSuccess: false,
+        message: '❌ Groq error: $e',
+      );
+    }
+  }
+
+  Future<String> _generateAiContent({
+    String? apiKey,
+    required String prompt,
+    String? model,
+    String? provider,
+    String? groqApiKey,
+    String? groqModel,
+    double temperature = 0.7,
+    int maxTokens = 500,
+  }) async {
+    final useGroq = provider == 'groq' ||
+        (groqApiKey != null &&
+            groqApiKey.trim().isNotEmpty &&
+            (apiKey == null || apiKey.trim().isEmpty || provider != 'gemini'));
+
+    if (useGroq && groqApiKey != null && groqApiKey.trim().isNotEmpty) {
+      return generateWithGroq(
+        apiKey: groqApiKey,
+        prompt: prompt,
+        model: groqModel,
+        temperature: temperature,
+        maxTokens: maxTokens,
+      );
+    }
+
+    if (apiKey != null && apiKey.trim().isNotEmpty) {
+      try {
+        return await _generateWithPrompt(
+          apiKey: apiKey,
+          prompt: prompt,
+          model: model,
+          temperature: temperature,
+          maxOutputTokens: maxTokens,
+        );
+      } catch (geminiError) {
+        // Fallback to Groq if Groq key is present
+        if (groqApiKey != null && groqApiKey.trim().isNotEmpty) {
+          try {
+            return await generateWithGroq(
+              apiKey: groqApiKey,
+              prompt: prompt,
+              model: groqModel,
+              temperature: temperature,
+              maxTokens: maxTokens,
+            );
+          } catch (_) {}
+        }
+        rethrow;
+      }
+    }
+
+    if (groqApiKey != null && groqApiKey.trim().isNotEmpty) {
+      return generateWithGroq(
+        apiKey: groqApiKey,
+        prompt: prompt,
+        model: groqModel,
+        temperature: temperature,
+        maxTokens: maxTokens,
+      );
+    }
+
+    throw const GeminiException(
+      'Please configure an AI API Key (Gemini or Groq) in Settings.',
+    );
+  }
+
   Future<String> generateFollowUp({
     required String apiKey,
     required Student student,
@@ -366,6 +596,9 @@ class GeminiService {
     String tone = 'General Follow-up',
     String customInstructions = '',
     String? companyDescription,
+    String? provider,
+    String? groqApiKey,
+    String? groqModel,
   }) async {
     final prompt = _buildPrompt(
       student: student,
@@ -375,12 +608,15 @@ class GeminiService {
       companyDescription: companyDescription,
     );
 
-    return _generateWithPrompt(
+    return _generateAiContent(
       apiKey: apiKey,
       prompt: prompt,
       model: model,
+      provider: provider,
+      groqApiKey: groqApiKey,
+      groqModel: groqModel,
       temperature: 0.7,
-      maxOutputTokens: 500,
+      maxTokens: 500,
     );
   }
 
@@ -388,6 +624,9 @@ class GeminiService {
     required String apiKey,
     required String rawRemark,
     String? model,
+    String? provider,
+    String? groqApiKey,
+    String? groqModel,
   }) async {
     final cleanRemark = rawRemark.trim();
     if (cleanRemark.isEmpty) {
@@ -412,12 +651,15 @@ CRITICAL RULES:
 4. OUTPUT FORMAT: Return ONLY the polished English remark text. Do not include quotes around the whole text, prefixes like "Polished Remark:", markdown code blocks, or explanations.
 ''';
 
-    return _generateWithPrompt(
+    return _generateAiContent(
       apiKey: apiKey,
       prompt: prompt,
       model: model,
+      provider: provider,
+      groqApiKey: groqApiKey,
+      groqModel: groqModel,
       temperature: 0.3,
-      maxOutputTokens: 200,
+      maxTokens: 200,
     );
   }
 
