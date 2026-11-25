@@ -85,7 +85,9 @@ object InCallNotificationHelper {
             .addAction(R.drawable.ic_incall_call, "Answer", answerPending)
             .addAction(R.drawable.ic_incall_call_end, "Decline", declinePending)
 
-        manager.notify(NOTIFICATION_ID, builder.build())
+        try {
+            manager.notify(NOTIFICATION_ID, builder.build())
+        } catch (_: SecurityException) {}
     }
 
     fun showOngoingCall(context: Context, callerName: String, phone: String, isHolding: Boolean) {
@@ -126,7 +128,9 @@ object InCallNotificationHelper {
             .setContentIntent(openPending)
             .addAction(R.drawable.ic_incall_call_end, "End Call", endPending)
 
-        manager.notify(NOTIFICATION_ID, builder.build())
+        try {
+            manager.notify(NOTIFICATION_ID, builder.build())
+        } catch (_: SecurityException) {}
     }
 
     fun cancel(context: Context) {

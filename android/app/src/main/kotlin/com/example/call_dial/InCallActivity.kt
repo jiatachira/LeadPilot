@@ -238,6 +238,11 @@ class InCallActivity : Activity(), CallStateListener {
         }
     }
 
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        updateUi()
+    }
+
     override fun onCallStateUpdated() {
         runOnUiThread {
             updateUi()
@@ -331,6 +336,11 @@ class InCallActivity : Activity(), CallStateListener {
         btnAudio.setColorFilter(if (isBluetooth) Color.parseColor("#0B131E") else Color.WHITE)
         lblAudio.text = if (isBluetooth) "BT Active" else "Bluetooth"
 
+        val canHold = (call.state == Call.STATE_ACTIVE || call.state == Call.STATE_HOLDING) &&
+            ((call.details?.callCapabilities ?: 0) and Call.Details.CAPABILITY_SUPPORT_HOLD != 0 ||
+                (call.details?.callCapabilities ?: 0) and Call.Details.CAPABILITY_HOLD != 0)
+        btnHold.isEnabled = canHold
+        btnHold.alpha = if (canHold) 1.0f else 0.4f
         btnHold.setBackgroundResource(if (isHolding) R.drawable.incall_btn_circle_active else R.drawable.incall_btn_circle)
         btnHold.setColorFilter(if (isHolding) Color.parseColor("#0B131E") else Color.WHITE)
         lblHold.text = if (isHolding) "Resume" else "Hold"

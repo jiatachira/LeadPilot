@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.ContactsContract
 import android.telecom.Call
 import android.telecom.CallAudioState
@@ -13,6 +15,7 @@ import android.telecom.TelecomManager
 import android.telecom.VideoProfile
 import android.util.Log
 import androidx.core.content.ContextCompat
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArraySet
 
 interface CallStateListener {
@@ -29,8 +32,10 @@ object LeadPilotCallManager {
         private set
     var currentAudioState: CallAudioState? = null
         private set
-    var callConnectedAtMs: Long = 0L
-        private set
+    private val callConnectTimes = ConcurrentHashMap<Call, Long>()
+    private val dtmfHandler = Handler(Looper.getMainLooper())
+    val callConnectedAtMs: Long
+        get() = primaryCall?.let { callConnectTimes[it] } ?: 0L
 
     private val listeners = CopyOnWriteArraySet<CallStateListener>()
 
@@ -117,10 +122,11 @@ object LeadPilotCallManager {
     private val callCallback = object : Call.Callback() {
         override fun onStateChanged(call: Call, state: Int) {
             Log.d(TAG, "onStateChanged: ${getPhoneNumber(call)} -> $state")
+            if (state == Call.STATE_ACTIVE && !callConnectTimes.containsKey(call)) {
+                val systemConnectTime = call.details?.connectTimeMillis ?: 0L
+                callConnectTimes[call] = if (systemConnectTime > 0L) systemConnectTime else System.currentTimeMillis()
+            }
             if (call == primaryCall) {
-                if (state == Call.STATE_ACTIVE && callConnectedAtMs == 0L) {
-                    callConnectedAtMs = System.currentTimeMillis()
-                }
                 val service = inCallService
                 if (service != null) {
                     val phone = getPhoneNumber(call)
@@ -142,6 +148,8 @@ object LeadPilotCallManager {
                         }
                     }
                 }
+            } else if (state == Call.STATE_DISCONNECTED) {
+                inCallService?.let { recordEndedCall(it.applicationContext, call) }
             }
             notifyListeners()
         }
@@ -153,8 +161,9 @@ object LeadPilotCallManager {
 
     private fun recordEndedCall(context: Context, call: Call) {
         val phone = getPhoneNumber(call)
-        if (phone.isNotBlank() && callConnectedAtMs > 0L) {
-            val durationSec = ((System.currentTimeMillis() - callConnectedAtMs) / 1000L).coerceAtLeast(0L)
+        val connectedAt = callConnectTimes[call] ?: 0L
+        if (phone.isNotBlank() && connectedAt > 0L) {
+            val durationSec = ((System.currentTimeMillis() - connectedAt) / 1000L).coerceAtLeast(0L)
             val direction = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 if (call.details?.callDirection == Call.Details.DIRECTION_INCOMING) "incoming" else "outgoing"
             } else {
@@ -166,9 +175,12 @@ object LeadPilotCallManager {
 
     fun onCallAdded(context: Context, call: Call) {
         call.registerCallback(callCallback)
+        if (call.state == Call.STATE_ACTIVE && !callConnectTimes.containsKey(call)) {
+            val systemConnectTime = call.details?.connectTimeMillis ?: 0L
+            callConnectTimes[call] = if (systemConnectTime > 0L) systemConnectTime else System.currentTimeMillis()
+        }
         if (primaryCall == null) {
             primaryCall = call
-            callConnectedAtMs = if (call.state == Call.STATE_ACTIVE) System.currentTimeMillis() else 0L
         } else if (secondaryCall == null && call != primaryCall) {
             secondaryCall = call
         }
@@ -192,18 +204,18 @@ object LeadPilotCallManager {
         try {
             call.unregisterCallback(callCallback)
         } catch (_: Exception) {}
+        callConnectTimes.remove(call)
 
         if (call == primaryCall) {
             primaryCall = secondaryCall
             secondaryCall = null
-            callConnectedAtMs = if (primaryCall?.state == Call.STATE_ACTIVE) System.currentTimeMillis() else 0L
         } else if (call == secondaryCall) {
             secondaryCall = null
         }
 
         val remaining = primaryCall
         if (remaining == null) {
-            callConnectedAtMs = 0L
+            dtmfHandler.removeCallbacksAndMessages(null)
             InCallNotificationHelper.cancel(context)
         } else {
             val phone = getPhoneNumber(remaining)
@@ -306,7 +318,14 @@ object LeadPilotCallManager {
     }
 
     fun playDtmf(digit: Char) {
-        primaryCall?.playDtmfTone(digit)
-        primaryCall?.stopDtmfTone()
+        val call = primaryCall ?: return
+        dtmfHandler.removeCallbacksAndMessages(null)
+        call.stopDtmfTone()
+        call.playDtmfTone(digit)
+        dtmfHandler.postDelayed({
+            try {
+                call.stopDtmfTone()
+            } catch (_: Exception) {}
+        }, 180L)
     }
 }

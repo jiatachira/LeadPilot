@@ -65,6 +65,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Student? _pendingCallStudent;
   DateTime? _callStartedAt;
+  bool _isDialpadOpen = false;
 
   @override
   void initState() {
@@ -77,7 +78,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(_checkAndLogCallDuration());
+      unawaited(_checkIncomingDialIntent());
     }
+  }
+
+  Future<void> _checkIncomingDialIntent() async {
+    if (!mounted || _isDialpadOpen) return;
+    try {
+      final dialNumber = await CallerIdService.getInitialDialNumber();
+      if (dialNumber.isNotEmpty && mounted && !_isDialpadOpen) {
+        await _openDialpad(prefill: dialNumber);
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadInitialOfflineData() async {
@@ -121,14 +133,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
 
     // Handle tel: intent when launched as default dialer
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
-      try {
-        final dialNumber = await CallerIdService.getInitialDialNumber();
-        if (dialNumber.isNotEmpty && mounted) {
-          await _openDialpad(prefill: dialNumber);
-        }
-      } catch (_) {}
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_checkIncomingDialIntent());
     });
   }
 
@@ -1731,30 +1737,77 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openDialpad({String prefill = ''}) async {
-    if (!mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => DialpadSheet(
-        students: _students,
-        initialNumber: prefill,
-        onCallNumber: (phone, {matchedStudent}) async {
-          if (matchedStudent != null) {
-            await _callStudent(matchedStudent);
-          } else {
-            final launched = await launchUrl(Uri.parse('tel:$phone'));
-            if (!launched && mounted) {
-              _showMessage('Could not open dialer for $phone');
+    if (!mounted || _isDialpadOpen) return;
+    _isDialpadOpen = true;
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => DialpadSheet(
+          students: _students,
+          initialNumber: prefill,
+          onCallNumber: (phone, {matchedStudent}) async {
+            if (matchedStudent != null) {
+              await _callStudent(matchedStudent);
+            } else {
+              await _callRawPhoneNumber(phone);
             }
+          },
+          onStudentMatchedTap: (student) {
+            Navigator.of(context).pop();
+            _editStudent(student);
+          },
+        ),
+      );
+    } finally {
+      _isDialpadOpen = false;
+    }
+  }
+
+  Future<void> _callRawPhoneNumber(String phone) async {
+    final cleanPhone = phone.trim();
+    if (cleanPhone.isEmpty) return;
+    try {
+      var hasPermission = await CallerIdService.hasCallPhonePermission();
+      if (!hasPermission) {
+        hasPermission = await CallerIdService.requestCallPhonePermission();
+      }
+      if (hasPermission) {
+        int preferredSlot = await _settingsStore.readPreferredSimSlot();
+        if (preferredSlot == -1) {
+          final simSlots = await CallerIdService.getSimSlots();
+          if (simSlots.length > 1 && mounted) {
+            final chosen = await _showSimChoiceSheet(
+              Student(name: cleanPhone, phone: cleanPhone),
+              simSlots,
+            );
+            if (chosen == null) return;
+            preferredSlot = chosen;
           }
-        },
-        onStudentMatchedTap: (student) {
-          Navigator.of(context).pop();
-          _editStudent(student);
-        },
-      ),
-    );
+        }
+        final success = await CallerIdService.directCall(
+          phone: cleanPhone,
+          simSlot: preferredSlot,
+          name: cleanPhone,
+        );
+        if (success) return;
+      }
+
+      final isDefault = await CallerIdService.isDefaultDialer();
+      if (isDefault) {
+        if (mounted) {
+          _showMessage('Phone permission is required to place calls.');
+        }
+        return;
+      }
+      final launched = await launchUrl(Uri.parse('tel:$cleanPhone'));
+      if (!launched && mounted) {
+        _showMessage('Could not open dialer for $cleanPhone');
+      }
+    } on Exception catch (error) {
+      if (mounted) _showMessage('Could not start the call: $error');
+    }
   }
 
   Future<void> _callStudent(Student student) async {
@@ -1779,7 +1832,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
           String preferredApp =
               await _settingsStore.readPreferredCallingApp();
-          if (preferredApp.isEmpty) {
+          final isDefault = await CallerIdService.isDefaultDialer();
+          if (preferredApp.isEmpty && !isDefault) {
             final callingApps = await CallerIdService.getCallingApps();
             if (callingApps.length > 1 && mounted) {
               final chosenApp =

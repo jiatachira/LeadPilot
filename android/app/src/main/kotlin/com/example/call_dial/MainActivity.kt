@@ -403,24 +403,54 @@ class MainActivity : FlutterFragmentActivity() {
 
                             val cleanPhone = phone.trim()
                             val callingAppPackage = call.argument<String>("callingAppPackage")
+                            val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
+
+                            // Find matching PhoneAccountHandle if simSlot is specified
+                            var selectedAccount: android.telecom.PhoneAccountHandle? = null
+                            if (simSlot >= 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && telecomManager != null) {
+                                try {
+                                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
+                                        val phoneAccounts = telecomManager.callCapablePhoneAccounts
+                                        if (simSlot < phoneAccounts.size) {
+                                            selectedAccount = phoneAccounts.firstOrNull { it.id.contains(simSlot.toString()) }
+                                                ?: phoneAccounts[simSlot]
+                                        }
+                                    }
+                                } catch (_: Exception) {}
+                            }
+
+                            val shouldPlaceDirectly = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                                telecomManager != null &&
+                                LeadPilotCallManager.isDefaultDialer(this) &&
+                                (callingAppPackage.isNullOrEmpty() || callingAppPackage == "auto" || callingAppPackage == packageName)
+
+                            if (shouldPlaceDirectly) {
+                                val extras = android.os.Bundle()
+                                if (selectedAccount != null) {
+                                    extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, selectedAccount)
+                                }
+                                telecomManager!!.placeCall(Uri.fromParts("tel", cleanPhone, null), extras)
+                                result.success(true)
+                                return@setMethodCallHandler
+                            }
+
                             val intent = Intent(Intent.ACTION_CALL).apply {
                                 data = Uri.parse("tel:${Uri.encode(cleanPhone)}")
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
 
-                            if (!callingAppPackage.isNullOrEmpty() && callingAppPackage != "auto" && callingAppPackage != "chooser") {
+                            if (!callingAppPackage.isNullOrEmpty() && callingAppPackage != "auto" && callingAppPackage != "chooser" && callingAppPackage != packageName) {
                                 intent.setPackage(callingAppPackage)
                             } else if (callingAppPackage != "chooser") {
-                                val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
                                 val defaultDialer = telecomManager?.defaultDialerPackage
-                                if (!defaultDialer.isNullOrEmpty()) {
+                                if (!defaultDialer.isNullOrEmpty() && defaultDialer != packageName) {
                                     intent.setPackage(defaultDialer)
                                 } else {
                                     val resolveList = packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
                                     val systemDialer = resolveList.firstOrNull { ri ->
                                         val p = ri.activityInfo.packageName.lowercase()
-                                        p.contains("dialer") || p.contains("phone") || p.contains("telecom")
-                                    } ?: resolveList.firstOrNull()
+                                        p != packageName && (p.contains("dialer") || p.contains("phone") || p.contains("telecom"))
+                                    } ?: resolveList.firstOrNull { it.activityInfo.packageName != packageName }
                                     if (systemDialer != null) {
                                         intent.setPackage(systemDialer.activityInfo.packageName)
                                     }
@@ -432,21 +462,8 @@ class MainActivity : FlutterFragmentActivity() {
                                 intent.putExtra("com.android.phone.extra.slot", simSlot)
                                 intent.putExtra("slot", simSlot)
                                 intent.putExtra("Cdma_SimId", simSlot)
-
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                    try {
-                                        val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
-                                        if (telecomManager != null &&
-                                            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
-                                            val phoneAccounts = telecomManager.callCapablePhoneAccounts
-                                            for (account in phoneAccounts) {
-                                                if (account.id.contains(simSlot.toString())) {
-                                                    intent.putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, account)
-                                                    break
-                                                }
-                                            }
-                                        }
-                                    } catch (_: Exception) {}
+                                if (selectedAccount != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                    intent.putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, selectedAccount)
                                 }
                             }
 
