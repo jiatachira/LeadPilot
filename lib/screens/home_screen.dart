@@ -544,6 +544,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _editStudent(Student student) async {
+    final scheduledNextCalls = _students
+        .where((s) => s.phone != student.phone)
+        .map((s) => tryParseDate(s.nextCallDateTime))
+        .whereType<DateTime>()
+        .toList();
     final updatedStudent = await showModalBottomSheet<Student>(
       context: context,
       isScrollControlled: true,
@@ -553,6 +558,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         settingsStore: _settingsStore,
         onWhatsApp: _openWhatsAppChat,
         onDetailsSaved: _persistStudentUpdate,
+        scheduledNextCalls: scheduledNextCalls,
       ),
     );
     if (updatedStudent == null || !mounted) return;

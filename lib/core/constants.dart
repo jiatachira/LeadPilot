@@ -68,6 +68,35 @@ DateTime combineReminderDateAndTime(
 bool isReminderDateTimeInFuture(DateTime dateTime, {required DateTime now}) =>
     dateTime.isAfter(now);
 
+/// Finds the next available call reminder slot starting at [desiredStart],
+/// advancing by [step] (default 5 minutes) whenever an existing scheduled call
+/// falls within [step] minutes of the candidate time.
+DateTime findNextAvailableCallSlot(
+  DateTime desiredStart,
+  Iterable<DateTime> existingCalls, {
+  Duration step = const Duration(minutes: 5),
+}) {
+  var candidate = DateTime(
+    desiredStart.year,
+    desiredStart.month,
+    desiredStart.day,
+    desiredStart.hour,
+    desiredStart.minute,
+  );
+  // Cap search to 48 steps (4 hours) so it always terminates cleanly.
+  for (var i = 0; i < 48; i++) {
+    final hasConflict = existingCalls.any((existing) {
+      final diffMinutes = existing.difference(candidate).inMinutes.abs();
+      return diffMinutes < step.inMinutes;
+    });
+    if (!hasConflict) {
+      return candidate;
+    }
+    candidate = candidate.add(step);
+  }
+  return candidate;
+}
+
 final _studentReminderCategory = DarwinNotificationCategory(
   'student_call_reminder',
   actions: [

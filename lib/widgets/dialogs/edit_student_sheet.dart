@@ -9,6 +9,7 @@ class EditStudentSheet extends StatefulWidget {
     this.voiceToTextService,
     this.onWhatsApp,
     this.onDetailsSaved,
+    this.scheduledNextCalls = const [],
   });
 
   final Student student;
@@ -17,6 +18,7 @@ class EditStudentSheet extends StatefulWidget {
   final VoiceToTextService? voiceToTextService;
   final ValueChanged<Student>? onWhatsApp;
   final Future<void> Function(Student previous, Student updated)? onDetailsSaved;
+  final List<DateTime> scheduledNextCalls;
 
   @override
   State<EditStudentSheet> createState() => _EditStudentSheetState();
@@ -185,10 +187,10 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
 
   void _setQuickReminder(Duration offset, [int? targetHour]) {
     final now = DateTime.now();
-    DateTime target;
+    DateTime desiredTarget;
     if (targetHour != null) {
       final tomorrow = now.add(const Duration(days: 1));
-      target = DateTime(
+      desiredTarget = DateTime(
         tomorrow.year,
         tomorrow.month,
         tomorrow.day,
@@ -196,31 +198,39 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
         0,
       );
     } else {
-      target = now.add(offset);
-      final remainder = target.minute % 5;
-      final roundedMinute = remainder == 0 ? target.minute : target.minute + (5 - remainder);
+      desiredTarget = now.add(offset);
+      final remainder = desiredTarget.minute % 5;
+      final roundedMinute =
+          remainder == 0 ? desiredTarget.minute : desiredTarget.minute + (5 - remainder);
       if (roundedMinute >= 60) {
-        target = DateTime(
-          target.year,
-          target.month,
-          target.day,
-          target.hour + 1,
+        desiredTarget = DateTime(
+          desiredTarget.year,
+          desiredTarget.month,
+          desiredTarget.day,
+          desiredTarget.hour + 1,
           roundedMinute - 60,
         );
       } else {
-        target = DateTime(
-          target.year,
-          target.month,
-          target.day,
-          target.hour,
+        desiredTarget = DateTime(
+          desiredTarget.year,
+          desiredTarget.month,
+          desiredTarget.day,
+          desiredTarget.hour,
           roundedMinute,
         );
       }
     }
+    final target = findNextAvailableCallSlot(
+      desiredTarget,
+      widget.scheduledNextCalls,
+    );
+    final wasAutoSpaced = target != desiredTarget;
     setState(() => _nextCallDateTime = target);
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(
       SnackBar(
-        content: Text('Next call scheduled: ${_formatReminder(target)}'),
+        content: Text(
+          'Next call scheduled: ${_formatReminder(target)}${wasAutoSpaced ? ' (auto-spaced)' : ''}',
+        ),
         duration: const Duration(seconds: 2),
       ),
     );

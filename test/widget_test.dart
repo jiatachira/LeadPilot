@@ -4218,13 +4218,13 @@ void main() {
     (tester) async {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(CallerIdService.channel, (call) async {
-        if (call.method == 'isCallerIdEnabled') return true;
-        if (call.method == 'canDrawOverlays') return true;
-        if (call.method == 'hasPhonePermissions') return true;
-        if (call.method == 'getCachedStudentCount') return 5;
-        if (call.method == 'isIgnoringBatteryOptimizations') return true;
-        return true;
-      });
+            if (call.method == 'isCallerIdEnabled') return true;
+            if (call.method == 'canDrawOverlays') return true;
+            if (call.method == 'hasPhonePermissions') return true;
+            if (call.method == 'getCachedStudentCount') return 5;
+            if (call.method == 'isIgnoringBatteryOptimizations') return true;
+            return true;
+          });
 
       final settingsStore = MemoryAppSettingsStore()..pin = '2580';
       await tester.pumpWidget(testApp(settingsStore: settingsStore));
@@ -4310,15 +4310,18 @@ void main() {
     },
   );
 
-  test('formatCallTimer formats elapsed seconds into mm:ss monospace clock', () {
-    expect(formatCallTimer(0), '00:00');
-    expect(formatCallTimer(9), '00:09');
-    expect(formatCallTimer(45), '00:45');
-    expect(formatCallTimer(60), '01:00');
-    expect(formatCallTimer(125), '02:05');
-    expect(formatCallTimer(3600), '60:00');
-    expect(formatCallTimer(-5), '00:00');
-  });
+  test(
+    'formatCallTimer formats elapsed seconds into mm:ss monospace clock',
+    () {
+      expect(formatCallTimer(0), '00:00');
+      expect(formatCallTimer(9), '00:09');
+      expect(formatCallTimer(45), '00:45');
+      expect(formatCallTimer(60), '01:00');
+      expect(formatCallTimer(125), '02:05');
+      expect(formatCallTimer(3600), '60:00');
+      expect(formatCallTimer(-5), '00:00');
+    },
+  );
 
   test('MemoryAppSettingsStore stores and reads directCalling, preferredSimSlot, and preferredCallingApp', () async {
     final store = MemoryAppSettingsStore();
@@ -4400,31 +4403,28 @@ void main() {
     },
   );
 
-  test(
-    'Student pre-computes searchIndex and caches parsed dates for fast search and sort',
-    () {
-      const student = Student(
-        name: 'Nimal Jayawardena',
-        phone: '0714567890',
-        location: 'Kandy',
-        callStatus: 'Interested',
-        addedDate: '2026-11-20',
-        nextCallDateTime: '2026-11-25 10:00 AM',
-        comment: 'Very keen on IT degree',
-      );
+  test('Student pre-computes searchIndex and caches parsed dates for fast search and sort', () {
+    const student = Student(
+      name: 'Nimal Jayawardena',
+      phone: '0714567890',
+      location: 'Kandy',
+      callStatus: 'Interested',
+      addedDate: '2026-11-20',
+      nextCallDateTime: '2026-11-25 10:00 AM',
+      comment: 'Very keen on IT degree',
+    );
 
-      expect(student.searchIndex, contains('nimal jayawardena'));
-      expect(student.searchIndex, contains('0714567890'));
-      expect(student.searchIndex, contains('kandy'));
-      expect(student.searchIndex, contains('interested'));
-      expect(student.searchIndex, contains('very keen on it degree'));
+    expect(student.searchIndex, contains('nimal jayawardena'));
+    expect(student.searchIndex, contains('0714567890'));
+    expect(student.searchIndex, contains('kandy'));
+    expect(student.searchIndex, contains('interested'));
+    expect(student.searchIndex, contains('very keen on it degree'));
 
-      expect(student.parsedAddedDate, isNotNull);
-      expect(student.parsedAddedDate!.year, 2026);
-      expect(student.parsedNextCallDate, isNotNull);
-      expect(student.parsedNextCallDate!.year, 2026);
-    },
-  );
+    expect(student.parsedAddedDate, isNotNull);
+    expect(student.parsedAddedDate!.year, 2026);
+    expect(student.parsedNextCallDate, isNotNull);
+    expect(student.parsedNextCallDate!.year, 2026);
+  });
 
   test(
     'Clean Architecture: exports all modular components and version is 1.29.1',
@@ -4479,8 +4479,9 @@ void main() {
       await enterPin(tester, '2580');
       await tester.pumpAndSettle();
 
-      final segmentedButton =
-          find.byWidgetPredicate((w) => w is SegmentedButton);
+      final segmentedButton = find.byWidgetPredicate(
+        (w) => w is SegmentedButton,
+      );
       expect(segmentedButton, findsOneWidget);
       expect(
         find.descendant(of: segmentedButton, matching: find.text('All')),
@@ -4512,7 +4513,10 @@ void main() {
       bool waTappedOnCard = false;
       bool historyTapped = false;
 
-      const student = Student(name: 'Quick Lead With A Full Long Name', phone: '0719876543');
+      const student = Student(
+        name: 'Quick Lead With A Full Long Name',
+        phone: '0719876543',
+      );
 
       await tester.pumpWidget(
         MaterialApp(
@@ -4581,11 +4585,7 @@ void main() {
 
       await tester.pumpWidget(
         const MaterialApp(
-          home: Scaffold(
-            body: EditStudentSheet(
-              student: student,
-            ),
-          ),
+          home: Scaffold(body: EditStudentSheet(student: student)),
         ),
       );
       await tester.pumpAndSettle();
@@ -4610,9 +4610,9 @@ void main() {
             jsonEncode({
               'choices': [
                 {
-                  'message': {'content': 'OK'}
-                }
-              ]
+                  'message': {'content': 'OK'},
+                },
+              ],
             }),
             200,
           );
@@ -4724,6 +4724,87 @@ void main() {
       expect(savedStudent!.attempts, isEmpty);
       expect(savedStudent!.commentHistory, isEmpty);
       expect(find.text('Edit Details · Nimal Perera'), findsNothing);
+    },
+  );
+
+  test('findNextAvailableCallSlot avoids collisions by auto-spacing in 5-minute steps', () {
+    final base = DateTime(2026, 11, 26, 10, 0);
+
+    // No existing calls -> returns 10:00
+    expect(findNextAvailableCallSlot(base, []), base);
+
+    // 10:00 and 10:05 taken -> returns 10:10
+    expect(
+      findNextAvailableCallSlot(base, [
+        DateTime(2026, 11, 26, 10, 0),
+        DateTime(2026, 11, 26, 10, 5),
+      ]),
+      DateTime(2026, 11, 26, 10, 10),
+    );
+
+    // Irregular 10:02 call conflicts with 10:00 and 10:05 -> returns 10:10
+    expect(
+      findNextAvailableCallSlot(base, [DateTime(2026, 11, 26, 10, 2)]),
+      DateTime(2026, 11, 26, 10, 10),
+    );
+  });
+
+  testWidgets(
+    'EditStudentSheet auto-spaces Tomorrow 10 AM quick chip when 10:00 and 10:05 are already scheduled',
+    (tester) async {
+      final now = DateTime.now();
+      final tomorrow = now.add(const Duration(days: 1));
+      final existingCalls = [
+        DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 10, 0),
+        DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 10, 5),
+      ];
+
+      Student? result;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () async {
+                  result = await showModalBottomSheet<Student>(
+                    context: context,
+                    isScrollControlled: true,
+                    builder: (_) => EditStudentSheet(
+                      student: const Student(
+                        name: 'Saman Kumara',
+                        phone: '0771234567',
+                        callStatus: 'Interested',
+                      ),
+                      scheduledNextCalls: existingCalls,
+                    ),
+                  );
+                },
+                child: const Text('Open Sheet'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Open Sheet'));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('Tomorrow 10 AM'));
+      await tester.tap(find.text('Tomorrow 10 AM'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('(auto-spaced)'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(result, isNotNull);
+      final savedReminder = tryParseDate(result!.nextCallDateTime);
+      expect(savedReminder, isNotNull);
+      expect(savedReminder!.hour, 10);
+      expect(savedReminder.minute, 10);
     },
   );
 }
