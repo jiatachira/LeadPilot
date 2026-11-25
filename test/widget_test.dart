@@ -4223,6 +4223,7 @@ void main() {
             if (call.method == 'hasPhonePermissions') return true;
             if (call.method == 'getCachedStudentCount') return 5;
             if (call.method == 'isIgnoringBatteryOptimizations') return true;
+            if (call.method == 'isDefaultDialer') return false;
             return true;
           });
 
@@ -4341,6 +4342,11 @@ void main() {
 
   testWidgets('Settings displays Direct In-App Calling toggle', (tester) async {
     final store = MemoryAppSettingsStore();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(CallerIdService.channel, (call) async {
+          if (call.method == 'isDefaultDialer') return false;
+          return null;
+        });
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -4363,6 +4369,9 @@ void main() {
 
     expect(find.text('Direct In-App Calling'), findsOneWidget);
     expect(find.text('Floating Call Head (1-Tap End Call)'), findsNothing);
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(CallerIdService.channel, null);
   });
 
   testWidgets(
@@ -4807,6 +4816,110 @@ void main() {
       expect(savedReminder, isNotNull);
       expect(savedReminder!.hour, 10);
       expect(savedReminder.minute, 10);
+    },
+  );
+
+  testWidgets(
+    'DialpadSheet allows entering digits, matches student, and triggers onCallNumber',
+    (tester) async {
+      String? calledPhone;
+      Student? calledStudent;
+
+      final students = [
+        const Student(
+          name: 'Nimal Perera',
+          phone: '0712345678',
+          callStatus: 'Interested',
+        ),
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: DialpadSheet(
+              students: students,
+              onCallNumber: (phone, {matchedStudent}) async {
+                calledPhone = phone;
+                calledStudent = matchedStudent;
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Tap digits 0, 7, 1, 2, 3, 4, 5, 6, 7, 8
+      for (final digit in ['0', '7', '1', '2', '3', '4', '5', '6', '7', '8']) {
+        await tester.tap(find.widgetWithText(InkWell, digit));
+        await tester.pumpAndSettle();
+      }
+
+      // Check entered digits display
+      expect(find.text('0712345678'), findsOneWidget);
+
+      // Student match card and call label should be displayed
+      expect(find.text('Nimal Perera • Interested'), findsOneWidget);
+      expect(find.text('Call Nimal Perera'), findsOneWidget);
+
+      // Tap call button
+      final callBtn = find.text('Call Nimal Perera');
+      expect(callBtn, findsOneWidget);
+      await tester.tap(callBtn);
+      await tester.pumpAndSettle();
+
+      expect(calledPhone, '0712345678');
+      expect(calledStudent?.name, 'Nimal Perera');
+    },
+  );
+
+  testWidgets(
+    'Settings Calling page displays Default Phone App card and handles tap',
+    (tester) async {
+      bool requestDefaultDialerCalled = false;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(CallerIdService.channel, (call) async {
+            if (call.method == 'isDefaultDialer') return false;
+            if (call.method == 'requestDefaultDialer') {
+              requestDefaultDialerCalled = true;
+              return true;
+            }
+            return null;
+          });
+
+      final store = MemoryAppSettingsStore();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SettingsHubSheet(
+              themeMode: ThemeMode.system,
+              onThemeModeChanged: (_) async {},
+              isSheetConnected: true,
+              hasActiveFilters: false,
+              biometricEnabled: false,
+              onBiometricChanged: (_) async {},
+              settingsStore: store,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Calling'));
+      await tester.pumpAndSettle();
+
+      final defaultPhoneCard = find.text('Default Phone App');
+      await tester.ensureVisible(defaultPhoneCard);
+      expect(defaultPhoneCard, findsOneWidget);
+
+      final setDefaultBtn = find.text('Set Default');
+      expect(setDefaultBtn, findsOneWidget);
+      await tester.tap(setDefaultBtn);
+      await tester.pumpAndSettle();
+
+      expect(requestDefaultDialerCalled, isTrue);
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(CallerIdService.channel, null);
     },
   );
 }

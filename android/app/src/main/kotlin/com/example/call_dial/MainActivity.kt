@@ -31,6 +31,8 @@ class MainActivity : FlutterFragmentActivity() {
     private val phonePermissionRequestCode = 2001
     private var pendingCallPermissionResult: MethodChannel.Result? = null
     private val callPermissionRequestCode = 2002
+    private var pendingDefaultDialerResult: MethodChannel.Result? = null
+    private val defaultDialerRequestCode = 2003
     private var pendingSpeechResult: MethodChannel.Result? = null
     private val speechRecognitionRequestCode = 3001
 
@@ -324,6 +326,47 @@ class MainActivity : FlutterFragmentActivity() {
                             result.error("SETTINGS_ERROR", e.message, null)
                         }
                     }
+                    "isDefaultDialer" -> {
+                        result.success(LeadPilotCallManager.isDefaultDialer(this))
+                    }
+                    "requestDefaultDialer" -> {
+                        try {
+                            if (LeadPilotCallManager.isDefaultDialer(this)) {
+                                result.success(true)
+                            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                val roleManager = getSystemService(Context.ROLE_SERVICE) as? android.app.role.RoleManager
+                                if (roleManager != null && roleManager.isRoleAvailable(android.app.role.RoleManager.ROLE_DIALER)) {
+                                    pendingDefaultDialerResult = result
+                                    val roleIntent = roleManager.createRequestRoleIntent(android.app.role.RoleManager.ROLE_DIALER)
+                                    startActivityForResult(roleIntent, defaultDialerRequestCode)
+                                } else {
+                                    result.success(false)
+                                }
+                            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                pendingDefaultDialerResult = result
+                                val intent = Intent(TelecomManager.ACTION_CHANGE_DEFAULT_DIALER).apply {
+                                    putExtra(TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME, packageName)
+                                }
+                                startActivityForResult(intent, defaultDialerRequestCode)
+                            } else {
+                                result.success(false)
+                            }
+                        } catch (e: Exception) {
+                            pendingDefaultDialerResult = null
+                            result.error("DIALER_ROLE_ERROR", e.message, null)
+                        }
+                    }
+                    "getInitialDialNumber" -> {
+                        val number = if (intent?.data?.scheme == "tel") {
+                            intent.data?.schemeSpecificPart?.trim() ?: ""
+                        } else {
+                            ""
+                        }
+                        if (number.isNotEmpty()) {
+                            intent?.data = null
+                        }
+                        result.success(number)
+                    }
                     "hasCallPhonePermission" -> {
                         val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
                         result.success(granted)
@@ -533,6 +576,11 @@ class MainActivity : FlutterFragmentActivity() {
             }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == speechRecognitionRequestCode) {
@@ -544,6 +592,9 @@ class MainActivity : FlutterFragmentActivity() {
                 pendingSpeechResult?.success("")
             }
             pendingSpeechResult = null
+        } else if (requestCode == defaultDialerRequestCode) {
+            pendingDefaultDialerResult?.success(LeadPilotCallManager.isDefaultDialer(this))
+            pendingDefaultDialerResult = null
         }
     }
 

@@ -22,4 +22,10 @@
         <item name="android:windowAnimationStyle">@android:style/Animation.Dialog</item>
         <item name="android:windowNoTitle">true</item>
     </style>
+    <style name="Theme.LeadPilot.InCall" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">#0B131E</item>
+        <item name="android:statusBarColor">#0B131E</item>
+        <item name="android:navigationBarColor">#0B131E</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
 </resources>

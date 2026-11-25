@@ -208,6 +208,39 @@ class CallerIdService {
     }
   }
 
+  static Future<bool> isDefaultDialer() async {
+    try {
+      final res = await channel.invokeMethod<bool>('isDefaultDialer');
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> requestDefaultDialer() async {
+    try {
+      final res = await channel.invokeMethod<bool>('requestDefaultDialer');
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<String> getInitialDialNumber() async {
+    try {
+      final res = await channel.invokeMethod<String>('getInitialDialNumber');
+      return res ?? '';
+    } on MissingPluginException {
+      return '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   static Future<bool> directCall({
     required String phone,
     int simSlot = -1,

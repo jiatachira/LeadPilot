@@ -119,6 +119,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _checkAutoUpdatesOnStartup();
     });
+
+    // Handle tel: intent when launched as default dialer
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      try {
+        final dialNumber = await CallerIdService.getInitialDialNumber();
+        if (dialNumber.isNotEmpty && mounted) {
+          await _openDialpad(prefill: dialNumber);
+        }
+      } catch (_) {}
+    });
   }
 
   Future<void> _checkAutoUpdatesOnStartup() async {
@@ -1453,16 +1464,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           : null,
       floatingActionButton: _isSelectionMode
           ? null
-          : FloatingActionButton.extended(
-              onPressed: _addStudent,
-              backgroundColor: _green,
-              foregroundColor: Colors.white,
-              elevation: 4,
-              icon: const Icon(Icons.person_add_alt_1_rounded),
-              label: const Text(
-                'Add student',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                FloatingActionButton(
+                  heroTag: 'fab_dialpad',
+                  onPressed: _openDialpad,
+                  backgroundColor:
+                      Theme.of(context).colorScheme.secondaryContainer,
+                  foregroundColor:
+                      Theme.of(context).colorScheme.onSecondaryContainer,
+                  elevation: 3,
+                  child: const Icon(Icons.dialpad_rounded),
+                ),
+                const SizedBox(height: 12),
+                FloatingActionButton.extended(
+                  heroTag: 'fab_add',
+                  onPressed: _addStudent,
+                  backgroundColor: _green,
+                  foregroundColor: Colors.white,
+                  elevation: 4,
+                  icon: const Icon(Icons.person_add_alt_1_rounded),
+                  label: const Text(
+                    'Add student',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
             ),
     );
   }
@@ -1698,6 +1727,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           },
         );
       },
+    );
+  }
+
+  Future<void> _openDialpad({String prefill = ''}) async {
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DialpadSheet(
+        students: _students,
+        initialNumber: prefill,
+        onCallNumber: (phone, {matchedStudent}) async {
+          if (matchedStudent != null) {
+            await _callStudent(matchedStudent);
+          } else {
+            final launched = await launchUrl(Uri.parse('tel:$phone'));
+            if (!launched && mounted) {
+              _showMessage('Could not open dialer for $phone');
+            }
+          }
+        },
+        onStudentMatchedTap: (student) {
+          Navigator.of(context).pop();
+          _editStudent(student);
+        },
+      ),
     );
   }
 

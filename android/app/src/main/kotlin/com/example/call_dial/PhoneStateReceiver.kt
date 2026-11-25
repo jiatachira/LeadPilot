@@ -27,6 +27,11 @@ class PhoneStateReceiver : BroadcastReceiver() {
 
         val appContext = context.applicationContext ?: context
 
+        if (LeadPilotCallManager.isDefaultDialer(appContext)) {
+            Log.d(TAG, "LeadPilot is default dialer; InCallService handles UI. Skipping overlay.")
+            return
+        }
+
         if (!CallerIdCacheManager.isCallerIdEnabled(appContext)) {
             Log.d(TAG, "Caller ID is disabled in settings. Skipping.")
             return
