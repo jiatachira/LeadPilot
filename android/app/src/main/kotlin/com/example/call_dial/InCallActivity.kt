@@ -502,10 +502,25 @@ class InCallActivity : Activity(), CallStateListener {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        FloatingCallOverlayManager.dismiss(this)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations && LeadPilotCallManager.primaryCall != null && !isFinishing) {
+            FloatingCallOverlayManager.show(this)
+        }
+    }
+
     override fun onDestroy() {
         handler.removeCallbacks(timerTick)
         LeadPilotCallManager.removeListener(this)
         releaseProximityWakeLock()
+        if (LeadPilotCallManager.primaryCall == null) {
+            FloatingCallOverlayManager.dismiss(this)
+        }
         super.onDestroy()
     }
 }

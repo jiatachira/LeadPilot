@@ -227,6 +227,7 @@ object LeadPilotCallManager {
             dtmfHandler.removeCallbacksAndMessages(null)
             CallRecorderManager.stopRecording()
             InCallNotificationHelper.cancel(context)
+            FloatingCallOverlayManager.dismiss(context)
         } else {
             val phone = getPhoneNumber(remaining)
             val (displayName, _) = resolveCallerDisplay(context, phone)
@@ -284,6 +285,26 @@ object LeadPilotCallManager {
         } else {
             inCallService?.setAudioRoute(CallAudioState.ROUTE_BLUETOOTH)
         }
+    }
+
+    fun cycleAudioRoute() {
+        val audioState = currentAudioState ?: return
+        val currentRoute = audioState.route
+        val supported = audioState.supportedRouteMask
+        val hasBt = (supported and CallAudioState.ROUTE_BLUETOOTH) != 0
+
+        val nextRoute = when (currentRoute) {
+            CallAudioState.ROUTE_SPEAKER -> {
+                if (hasBt) CallAudioState.ROUTE_BLUETOOTH else CallAudioState.ROUTE_WIRED_OR_EARPIECE
+            }
+            CallAudioState.ROUTE_BLUETOOTH -> {
+                CallAudioState.ROUTE_WIRED_OR_EARPIECE
+            }
+            else -> {
+                CallAudioState.ROUTE_SPEAKER
+            }
+        }
+        inCallService?.setAudioRoute(nextRoute)
     }
 
     fun toggleHold() {
