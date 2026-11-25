@@ -61,6 +61,7 @@ part 'widgets/dialogs/whatsapp_template_picker_sheet.dart';
 part 'widgets/dialogs/bulk_dispatch_sheet.dart';
 part 'widgets/dialogs/manage_gemini_ai_sheet.dart';
 part 'widgets/dialogs/gemini_ai_message_sheet.dart';
+part 'widgets/dialogs/dialpad_sheet.dart';
 
 // Entry Point & Root Application Widget
 Future<void> main() async {

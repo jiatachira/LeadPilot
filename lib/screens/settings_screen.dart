@@ -946,6 +946,27 @@ class _CallingSettingsSubPage extends StatefulWidget {
 
 class _CallingSettingsSubPageState extends State<_CallingSettingsSubPage> {
   late bool _directCalling = widget.directCalling;
+  bool? _isDefaultDialer;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshDefaultDialerStatus();
+  }
+
+  Future<void> _refreshDefaultDialerStatus() async {
+    try {
+      final val = await CallerIdService.isDefaultDialer();
+      if (mounted) setState(() => _isDefaultDialer = val);
+    } catch (_) {
+      if (mounted) setState(() => _isDefaultDialer = false);
+    }
+  }
+
+  Future<void> _requestDefaultDialer() async {
+    await CallerIdService.requestDefaultDialer();
+    await _refreshDefaultDialerStatus();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1003,6 +1024,45 @@ class _CallingSettingsSubPageState extends State<_CallingSettingsSubPage> {
                   ),
                 ],
               ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          // ── Default Phone App card ──────────────────────────────────────
+          Card(
+            color: theme.colorScheme.surfaceContainerLow,
+            child: ListTile(
+              leading: Icon(
+                Icons.dialer_sip_rounded,
+                color: (_isDefaultDialer ?? false)
+                    ? theme.colorScheme.primary
+                    : null,
+              ),
+              title: const Text('Default Phone App'),
+              subtitle: _isDefaultDialer == null
+                  ? const Text('Checking…')
+                  : _isDefaultDialer!
+                      ? const Text(
+                          'LeadPilot is your default dialer — full in-call UI for all calls',
+                        )
+                      : const Text(
+                          'Set LeadPilot as default dialer to show CRM info during all calls',
+                        ),
+              trailing: _isDefaultDialer == null
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : _isDefaultDialer!
+                      ? Icon(
+                          Icons.check_circle_rounded,
+                          color: theme.colorScheme.primary,
+                        )
+                      : FilledButton.tonal(
+                          onPressed: _requestDefaultDialer,
+                          child: const Text('Set Default'),
+                        ),
+              onTap: _isDefaultDialer == true ? null : _requestDefaultDialer,
             ),
           ),
         ],
