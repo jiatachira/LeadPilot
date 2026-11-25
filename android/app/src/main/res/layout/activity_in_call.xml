@@ -389,6 +389,35 @@
                     android:textSize="12sp" />
             </LinearLayout>
 
+            <!-- Record Call -->
+            <LinearLayout
+                android:id="@+id/btn_wrap_record"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ImageButton
+                    android:id="@+id/incall_btn_record"
+                    android:layout_width="60dp"
+                    android:layout_height="60dp"
+                    android:background="@drawable/incall_btn_circle"
+                    android:contentDescription="Record"
+                    android:padding="16dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_incall_mic" />
+
+                <TextView
+                    android:id="@+id/incall_lbl_record"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Record"
+                    android:textColor="#CBD5E1"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
             <!-- Bluetooth / Audio Route -->
             <LinearLayout
                 android:id="@+id/btn_wrap_audio"

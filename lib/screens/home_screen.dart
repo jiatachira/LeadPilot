@@ -62,6 +62,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   DateTime? _dateFrom;
   DateTime? _dateTo;
   bool _isSelectionMode = false;
+  int _activeTabIndex = 0;
 
   Student? _pendingCallStudent;
   DateTime? _callStartedAt;
@@ -1127,7 +1128,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final todayCount = _countForCategory(_LeadFilter.todayFollowUp);
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: _activeTabIndex != 0
+          ? null
+          : AppBar(
         automaticallyImplyLeading: false,
         leading: _isSelectionMode
             ? IconButton(
@@ -1252,8 +1255,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 const SizedBox(width: 4),
               ],
       ),
-      body: SafeArea(
-        child: Stack(
+      body: _activeTabIndex == 0
+          ? SafeArea(
+              child: Stack(
           children: [
             Column(
               children: [
@@ -1404,7 +1408,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
       ],
     ),
-  ),
+  )
+          : RecentsScreen(
+              students: _students,
+              onOpenStudent: _editStudent,
+              onCallNumber: _callRawPhoneNumber,
+              onOpenDialpad: _openDialpad,
+              onAddStudentWithPhone: (_) => _addStudent(),
+            ),
       bottomNavigationBar: _isSelectionMode
           ? Container(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
@@ -1467,8 +1478,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
             )
-          : null,
-      floatingActionButton: _isSelectionMode
+          : NavigationBar(
+              selectedIndex: _activeTabIndex,
+              onDestinationSelected: (idx) {
+                setState(() => _activeTabIndex = idx);
+              },
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.people_outline_rounded),
+                  selectedIcon: Icon(Icons.people_rounded),
+                  label: 'Leads',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.history_rounded),
+                  selectedIcon: Icon(Icons.history_rounded),
+                  label: 'Recents',
+                ),
+              ],
+            ),
+      floatingActionButton: (_isSelectionMode || _activeTabIndex != 0)
           ? null
           : Column(
               mainAxisSize: MainAxisSize.min,

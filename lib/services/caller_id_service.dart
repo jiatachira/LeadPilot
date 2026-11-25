@@ -298,6 +298,112 @@ class CallerIdService {
       return 0;
     }
   }
+
+  // ── Recording ────────────────────────────────────────────────────────────
+
+  static Future<bool> isAutoRecordEnabled() async {
+    try {
+      return await channel.invokeMethod<bool>('isAutoRecordEnabled') ?? false;
+    } on MissingPluginException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> setAutoRecordEnabled(bool enabled) async {
+    try {
+      await channel.invokeMethod('setAutoRecordEnabled', {'enabled': enabled});
+    } on MissingPluginException {
+      // tests
+    } catch (_) {}
+  }
+
+  static Future<List<Map<String, dynamic>>> listRecordings() async {
+    try {
+      final res = await channel.invokeListMethod<dynamic>('listRecordings');
+      if (res == null) return [];
+      return res
+          .whereType<Map>()
+          .map((m) => m.map((k, v) => MapEntry(k.toString(), v)))
+          .toList();
+    } on MissingPluginException {
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<bool> deleteRecording(String path) async {
+    try {
+      return await channel.invokeMethod<bool>('deleteRecording', {'path': path}) ?? false;
+    } on MissingPluginException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> playRecording(String path) async {
+    try {
+      return await channel.invokeMethod<bool>('playRecording', {'path': path}) ?? false;
+    } on MissingPluginException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> stopPlayback() async {
+    try {
+      await channel.invokeMethod('stopPlayback');
+    } on MissingPluginException {
+      // tests
+    } catch (_) {}
+  }
+
+  static Future<Map<String, dynamic>> getPlaybackStatus() async {
+    try {
+      final res = await channel.invokeMapMethod<String, dynamic>('getPlaybackStatus');
+      return res ?? {};
+    } on MissingPluginException {
+      return {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  // ── Call History ─────────────────────────────────────────────────────────
+
+  static Future<List<Map<String, dynamic>>> getCallHistory() async {
+    try {
+      final res = await channel.invokeListMethod<dynamic>('getCallHistory');
+      if (res == null) return [];
+      return res
+          .whereType<Map>()
+          .map((m) => m.map((k, v) => MapEntry(k.toString(), v)))
+          .toList();
+    } on MissingPluginException {
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getSystemCallLogs({int limit = 50}) async {
+    try {
+      final res = await channel.invokeListMethod<dynamic>('getSystemCallLogs', {'limit': limit});
+      if (res == null) return [];
+      return res
+          .whereType<Map>()
+          .map((m) => m.map((k, v) => MapEntry(k.toString(), v)))
+          .toList();
+    } on MissingPluginException {
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
 }
 
 abstract interface class ReminderScheduler {

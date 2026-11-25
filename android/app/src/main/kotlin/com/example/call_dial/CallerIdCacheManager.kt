@@ -212,6 +212,7 @@ object CallerIdCacheManager {
                 arr.put(item)
             }
             prefs.edit().putString(KEY_PENDING_LIST, arr.toString()).apply()
+            addCallLog(context, phone, durationSec, callType)
             Log.d(TAG, "addPendingCallLog: Saved call log for $phone (duration=${durationSec}s, type=$callType)")
         } catch (e: Exception) {
             Log.e(TAG, "addPendingCallLog error", e)
@@ -236,5 +237,42 @@ object CallerIdCacheManager {
     fun clearPendingCallLogs(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_PENDING_CALLS, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
+    }
+
+    private const val PREFS_CALL_HISTORY = "leadpilot_call_history"
+    private const val KEY_CALL_HISTORY_LIST = "call_history"
+    private const val MAX_CALL_HISTORY = 200
+
+    fun addCallLog(context: Context, phone: String, durationSec: Long, callType: String) {
+        try {
+            val prefs = context.getSharedPreferences(PREFS_CALL_HISTORY, Context.MODE_PRIVATE)
+            val existing = getCallLogs(context).toMutableList()
+            val obj = JSONObject().apply {
+                put("phone", phone)
+                put("duration", durationSec)
+                put("type", callType)
+                put("timestamp", System.currentTimeMillis())
+            }
+            existing.add(0, obj) // newest first
+            val trimmed = if (existing.size > MAX_CALL_HISTORY) existing.subList(0, MAX_CALL_HISTORY) else existing
+            val arr = JSONArray()
+            for (item in trimmed) arr.put(item)
+            prefs.edit().putString(KEY_CALL_HISTORY_LIST, arr.toString()).apply()
+        } catch (e: Exception) {
+            Log.e(TAG, "addCallLog error", e)
+        }
+    }
+
+    fun getCallLogs(context: Context): List<JSONObject> {
+        val prefs = context.getSharedPreferences(PREFS_CALL_HISTORY, Context.MODE_PRIVATE)
+        val str = prefs.getString(KEY_CALL_HISTORY_LIST, null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(str)
+            val list = mutableListOf<JSONObject>()
+            for (i in 0 until arr.length()) list.add(arr.getJSONObject(i))
+            list
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 }

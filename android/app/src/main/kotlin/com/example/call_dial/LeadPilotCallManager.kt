@@ -136,6 +136,12 @@ object LeadPilotCallManager {
                             InCallNotificationHelper.showIncomingCall(service.applicationContext, displayName, phone)
                         }
                         Call.STATE_DIALING, Call.STATE_CONNECTING, Call.STATE_ACTIVE, Call.STATE_HOLDING -> {
+                            if (state == Call.STATE_ACTIVE &&
+                                CallRecorderManager.isAutoRecordEnabled(service.applicationContext) &&
+                                !CallRecorderManager.isRecording
+                            ) {
+                                CallRecorderManager.startRecording(service.applicationContext, phone)
+                            }
                             InCallNotificationHelper.showOngoingCall(
                                 service.applicationContext,
                                 displayName,
@@ -144,6 +150,9 @@ object LeadPilotCallManager {
                             )
                         }
                         Call.STATE_DISCONNECTED -> {
+                            if (CallRecorderManager.isRecording && secondaryCall == null) {
+                                CallRecorderManager.stopRecording()
+                            }
                             recordEndedCall(service.applicationContext, call)
                         }
                     }
@@ -216,6 +225,7 @@ object LeadPilotCallManager {
         val remaining = primaryCall
         if (remaining == null) {
             dtmfHandler.removeCallbacksAndMessages(null)
+            CallRecorderManager.stopRecording()
             InCallNotificationHelper.cancel(context)
         } else {
             val phone = getPhoneNumber(remaining)
@@ -315,6 +325,18 @@ object LeadPilotCallManager {
         } else {
             sec.disconnect()
         }
+    }
+
+    fun toggleRecording(context: Context): Boolean {
+        val result = if (CallRecorderManager.isRecording) {
+            CallRecorderManager.stopRecording()
+            false
+        } else {
+            val phone = getPhoneNumber(primaryCall)
+            CallRecorderManager.startRecording(context.applicationContext, phone)
+        }
+        notifyListeners()
+        return result
     }
 
     fun playDtmf(digit: Char) {
