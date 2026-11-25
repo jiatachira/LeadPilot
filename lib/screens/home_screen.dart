@@ -552,10 +552,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         student: student,
         settingsStore: _settingsStore,
         onWhatsApp: _openWhatsAppChat,
+        onDetailsSaved: _persistStudentUpdate,
       ),
     );
     if (updatedStudent == null || !mounted) return;
+    await _persistStudentUpdate(student, updatedStudent);
+  }
 
+  Future<void> _persistStudentUpdate(
+    Student student,
+    Student updatedStudent,
+  ) async {
     final index = _students.indexOf(student);
     if (index < 0) return;
     setState(() {

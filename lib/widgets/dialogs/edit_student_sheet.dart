@@ -8,6 +8,7 @@ class EditStudentSheet extends StatefulWidget {
     this.geminiService,
     this.voiceToTextService,
     this.onWhatsApp,
+    this.onDetailsSaved,
   });
 
   final Student student;
@@ -15,6 +16,7 @@ class EditStudentSheet extends StatefulWidget {
   final GeminiService? geminiService;
   final VoiceToTextService? voiceToTextService;
   final ValueChanged<Student>? onWhatsApp;
+  final Future<void> Function(Student previous, Student updated)? onDetailsSaved;
 
   @override
   State<EditStudentSheet> createState() => _EditStudentSheetState();
@@ -35,6 +37,7 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
       widget.voiceToTextService ?? DefaultVoiceToTextService();
 
   bool _isEditingDetails = false;
+  bool _isSavingDetails = false;
   late Student _activeStudent = widget.student;
 
   // Log call fields
@@ -145,22 +148,37 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
     );
   }
 
-  void _saveDetails() {
-    if (!_detailsFormKey.currentState!.validate()) return;
+  Future<void> _saveDetails() async {
+    if (!_detailsFormKey.currentState!.validate() || _isSavingDetails) return;
     final name = _nameController.text.trim();
     final phone = _phoneController.text.trim();
+    final updated = _activeStudent.copyWith(
+      name: name,
+      phone: phone,
+      examType: _examType ?? '',
+      examYear: _examYearController.text.trim(),
+      location: _locationController.text.trim(),
+      olEnglish: _englishController.text.trim().toUpperCase(),
+      olMaths: _mathsController.text.trim().toUpperCase(),
+      whatsappNumber: _sameAsContact ? phone : _whatsappController.text.trim(),
+      whatsappSameAsContact: _sameAsContact,
+    );
+    if (widget.onDetailsSaved != null) {
+      setState(() => _isSavingDetails = true);
+      try {
+        await widget.onDetailsSaved!(_activeStudent, updated);
+      } finally {
+        if (mounted) {
+          setState(() => _isSavingDetails = false);
+        }
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.removeCurrentSnackBar();
+      Navigator.of(context).pop();
+      return;
+    }
     setState(() {
-      _activeStudent = _activeStudent.copyWith(
-        name: name,
-        phone: phone,
-        examType: _examType ?? '',
-        examYear: _examYearController.text.trim(),
-        location: _locationController.text.trim(),
-        olEnglish: _englishController.text.trim().toUpperCase(),
-        olMaths: _mathsController.text.trim().toUpperCase(),
-        whatsappNumber: _sameAsContact ? phone : _whatsappController.text.trim(),
-        whatsappSameAsContact: _sameAsContact,
-      );
+      _activeStudent = updated;
       _isEditingDetails = false;
     });
   }
@@ -1079,9 +1097,18 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
           SizedBox(
             height: 52,
             child: ElevatedButton.icon(
-              onPressed: _saveDetails,
-              icon: const Icon(Icons.check_rounded),
-              label: const Text('Save'),
+              onPressed: _isSavingDetails ? null : _saveDetails,
+              icon: _isSavingDetails
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.check_rounded),
+              label: Text(_isSavingDetails ? 'Saving...' : 'Save'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _green,
                 foregroundColor: Colors.white,

@@ -852,6 +852,10 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
+    // Edit details saved directly and closed the sheet; reopen Mia Fernando to log a call
+    await tester.tap(find.text('Mia Fernando'));
+    await tester.pumpAndSettle();
+
     final remarkField = find.widgetWithText(
       TextFormField,
       'Call remark (optional)',
@@ -889,12 +893,28 @@ void main() {
     expect(reminderScheduler.exactAlarmPermissionRequests, 1);
     expect(reminderScheduler.scheduled, hasLength(1));
 
-    final update = requests.lastWhere((request) => request.method == 'POST');
-    final payload = jsonDecode(update.body) as Map<String, dynamic>;
+    final updateRequests = requests
+        .where(
+          (request) =>
+              request.method == 'POST' &&
+              (jsonDecode(request.body) as Map<String, dynamic>)['action'] ==
+                  'update',
+        )
+        .toList();
+    expect(updateRequests.length, 2);
+    final detailsPayload =
+        jsonDecode(updateRequests.first.body) as Map<String, dynamic>;
+    expect(detailsPayload['action'], 'update');
+    expect(detailsPayload['name'], 'Mia Fernando');
+    expect(detailsPayload['contact'], '555-0199');
+    expect(detailsPayload['previousContact'], '555-0104');
+
+    final payload =
+        jsonDecode(updateRequests.last.body) as Map<String, dynamic>;
     expect(payload['action'], 'update');
     expect(payload['name'], 'Mia Fernando');
     expect(payload['contact'], '555-0199');
-    expect(payload['previousContact'], '555-0104');
+    expect(payload['previousContact'], '555-0199');
     expect(payload['examType'], 'A/L');
     expect(payload['examYear'], '2025');
     expect(payload['location'], 'Colombo');
@@ -4645,6 +4665,65 @@ void main() {
 
       expect(await store.readAiProvider(), 'groq');
       expect(await store.readGroqApiKey(), 'gsk_test1234567890abcdef');
+    },
+  );
+
+  testWidgets(
+    'EditStudentSheet saves details directly via onDetailsSaved without adding a call attempt',
+    (tester) async {
+      const student = Student(
+        name: 'Nimal Perera',
+        phone: '0771234567',
+        location: 'Colombo',
+        callStatus: 'Interested',
+      );
+
+      Student? savedStudent;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () {
+                  showModalBottomSheet<Student>(
+                    context: context,
+                    isScrollControlled: true,
+                    builder: (_) => EditStudentSheet(
+                      student: student,
+                      onDetailsSaved: (prev, updated) async {
+                        savedStudent = updated;
+                      },
+                    ),
+                  );
+                },
+                child: const Text('Open Sheet'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Open Sheet'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Edit details'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const ValueKey('edit-name-input')),
+        'Nimal S. Perera',
+      );
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      // Sheet should pop directly and onDetailsSaved should be invoked
+      expect(savedStudent, isNotNull);
+      expect(savedStudent!.name, 'Nimal S. Perera');
+      expect(savedStudent!.attempts, isEmpty);
+      expect(savedStudent!.commentHistory, isEmpty);
+      expect(find.text('Edit Details · Nimal Perera'), findsNothing);
     },
   );
 }
