@@ -185,7 +185,10 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
     });
   }
 
-  void _setQuickReminder(Duration offset, [int? targetHour]) {
+  ({DateTime desired, DateTime slot}) _resolveQuickSlot(
+    Duration offset, [
+    int? targetHour,
+  ]) {
     final now = DateTime.now();
     DateTime desiredTarget;
     if (targetHour != null) {
@@ -200,8 +203,9 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
     } else {
       desiredTarget = now.add(offset);
       final remainder = desiredTarget.minute % 5;
-      final roundedMinute =
-          remainder == 0 ? desiredTarget.minute : desiredTarget.minute + (5 - remainder);
+      final roundedMinute = remainder == 0
+          ? desiredTarget.minute
+          : desiredTarget.minute + (5 - remainder);
       if (roundedMinute >= 60) {
         desiredTarget = DateTime(
           desiredTarget.year,
@@ -220,11 +224,24 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
         );
       }
     }
-    final target = findNextAvailableCallSlot(
+    final slot = findNextAvailableCallSlot(
       desiredTarget,
       widget.scheduledNextCalls,
     );
-    final wasAutoSpaced = target != desiredTarget;
+    return (desired: desiredTarget, slot: slot);
+  }
+
+  String _formatChipTime(DateTime dt) {
+    final hour12 = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+    final period = dt.hour >= 12 ? 'PM' : 'AM';
+    final minuteStr = dt.minute.toString().padLeft(2, '0');
+    return '$hour12:$minuteStr $period';
+  }
+
+  void _setQuickReminder(Duration offset, [int? targetHour]) {
+    final resolved = _resolveQuickSlot(offset, targetHour);
+    final target = resolved.slot;
+    final wasAutoSpaced = target != resolved.desired;
     setState(() => _nextCallDateTime = target);
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(
       SnackBar(
@@ -668,43 +685,72 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
             ),
           const SizedBox(height: 6),
           // Quick chips + Pick date & time
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                ActionChip(
-                  avatar: const Icon(Icons.add_alarm_rounded, size: 15),
-                  label: const Text('+1 hr'),
-                  onPressed: () => _setQuickReminder(const Duration(hours: 1)),
+          Builder(
+            builder: (context) {
+              final plus1 = _resolveQuickSlot(const Duration(hours: 1));
+              final plus3 = _resolveQuickSlot(const Duration(hours: 3));
+              final tom10 = _resolveQuickSlot(const Duration(days: 1), 10);
+              final tom14 = _resolveQuickSlot(const Duration(days: 1), 14);
+
+              final plus1Label = plus1.slot != plus1.desired
+                  ? '+1 hr (${_formatChipTime(plus1.slot)})'
+                  : '+1 hr';
+              final plus3Label = plus3.slot != plus3.desired
+                  ? '+3 hrs (${_formatChipTime(plus3.slot)})'
+                  : '+3 hrs';
+              final tom10Label =
+                  (tom10.slot.hour == 10 && tom10.slot.minute == 0)
+                  ? 'Tomorrow 10 AM'
+                  : 'Tomorrow ${_formatChipTime(tom10.slot)}';
+              final tom14Label =
+                  (tom14.slot.hour == 14 && tom14.slot.minute == 0)
+                  ? 'Tomorrow 2 PM'
+                  : 'Tomorrow ${_formatChipTime(tom14.slot)}';
+
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    ActionChip(
+                      avatar: const Icon(Icons.add_alarm_rounded, size: 15),
+                      label: Text(plus1Label),
+                      onPressed: () =>
+                          _setQuickReminder(const Duration(hours: 1)),
+                    ),
+                    const SizedBox(width: 8),
+                    ActionChip(
+                      avatar: const Icon(Icons.add_alarm_rounded, size: 15),
+                      label: Text(plus3Label),
+                      onPressed: () =>
+                          _setQuickReminder(const Duration(hours: 3)),
+                    ),
+                    const SizedBox(width: 8),
+                    ActionChip(
+                      avatar: const Icon(Icons.wb_sunny_outlined, size: 15),
+                      label: Text(tom10Label),
+                      onPressed: () =>
+                          _setQuickReminder(const Duration(days: 1), 10),
+                    ),
+                    const SizedBox(width: 8),
+                    ActionChip(
+                      avatar: const Icon(Icons.brightness_5_rounded, size: 15),
+                      label: Text(tom14Label),
+                      onPressed: () =>
+                          _setQuickReminder(const Duration(days: 1), 14),
+                    ),
+                    const SizedBox(width: 8),
+                    ActionChip(
+                      avatar: const Icon(
+                        Icons.calendar_month_outlined,
+                        size: 15,
+                      ),
+                      label: const Text('Pick date & time'),
+                      onPressed: _pickNextCallDateTime,
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                ActionChip(
-                  avatar: const Icon(Icons.add_alarm_rounded, size: 15),
-                  label: const Text('+3 hrs'),
-                  onPressed: () => _setQuickReminder(const Duration(hours: 3)),
-                ),
-                const SizedBox(width: 8),
-                ActionChip(
-                  avatar: const Icon(Icons.wb_sunny_outlined, size: 15),
-                  label: const Text('Tomorrow 10 AM'),
-                  onPressed: () =>
-                      _setQuickReminder(const Duration(days: 1), 10),
-                ),
-                const SizedBox(width: 8),
-                ActionChip(
-                  avatar: const Icon(Icons.brightness_5_rounded, size: 15),
-                  label: const Text('Tomorrow 2 PM'),
-                  onPressed: () =>
-                      _setQuickReminder(const Duration(days: 1), 14),
-                ),
-                const SizedBox(width: 8),
-                ActionChip(
-                  avatar: const Icon(Icons.calendar_month_outlined, size: 15),
-                  label: const Text('Pick date & time'),
-                  onPressed: _pickNextCallDateTime,
-                ),
-              ],
-            ),
+              );
+            },
           ),
           const SizedBox(height: 16),
           // Remark field

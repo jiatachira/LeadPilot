@@ -4790,8 +4790,10 @@ void main() {
       await tester.tap(find.text('Open Sheet'));
       await tester.pumpAndSettle();
 
-      await tester.ensureVisible(find.text('Tomorrow 10 AM'));
-      await tester.tap(find.text('Tomorrow 10 AM'));
+      // Chip label dynamically reflects the next free slot (10:10 AM)
+      expect(find.text('Tomorrow 10:10 AM'), findsOneWidget);
+      await tester.ensureVisible(find.text('Tomorrow 10:10 AM'));
+      await tester.tap(find.text('Tomorrow 10:10 AM'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('(auto-spaced)'), findsOneWidget);
