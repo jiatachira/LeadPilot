@@ -7,12 +7,14 @@ class EditStudentSheet extends StatefulWidget {
     this.settingsStore,
     this.geminiService,
     this.voiceToTextService,
+    this.onWhatsApp,
   });
 
   final Student student;
   final AppSettingsStore? settingsStore;
   final GeminiService? geminiService;
   final VoiceToTextService? voiceToTextService;
+  final ValueChanged<Student>? onWhatsApp;
 
   @override
   State<EditStudentSheet> createState() => _EditStudentSheetState();
@@ -474,7 +476,7 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
                         color: theme.colorScheme.onSurface,
                         fontWeight: FontWeight.w800,
                       ),
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
@@ -488,6 +490,29 @@ class _EditStudentSheetState extends State<EditStudentSheet> {
                   ],
                 ),
               ),
+              IconButton.filled(
+                tooltip: 'WhatsApp ${_activeStudent.name}',
+                onPressed: () {
+                  if (widget.onWhatsApp != null) {
+                    widget.onWhatsApp!(_activeStudent);
+                  } else {
+                    final target =
+                        _activeStudent.whatsappNumber.trim().isEmpty
+                        ? _activeStudent.phone
+                        : _activeStudent.whatsappNumber;
+                    launchUrl(
+                      whatsAppChatUri(target),
+                      mode: LaunchMode.externalApplication,
+                    );
+                  }
+                },
+                icon: const FaIcon(FontAwesomeIcons.whatsapp, size: 20),
+                style: IconButton.styleFrom(
+                  backgroundColor: const Color(0xFF25D366),
+                  foregroundColor: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 8),
               IconButton.filled(
                 tooltip: 'Call ${_activeStudent.name}',
                 onPressed: () =>

@@ -65,8 +65,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Student? _pendingCallStudent;
   DateTime? _callStartedAt;
-  Student? _activeInAppCallStudent;
-  Offset _activeCallPillPosition = const Offset(16, 70);
 
   @override
   void initState() {
@@ -553,6 +551,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       builder: (_) => _EditStudentSheet(
         student: student,
         settingsStore: _settingsStore,
+        onWhatsApp: _openWhatsAppChat,
       ),
     );
     if (updatedStudent == null || !mounted) return;
@@ -1373,75 +1372,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ],
             ),
-            if (_activeInAppCallStudent != null)
-          Positioned(
-            left: _activeCallPillPosition.dx,
-            top: _activeCallPillPosition.dy,
-            child: GestureDetector(
-              onPanUpdate: (details) {
-                setState(() {
-                  _activeCallPillPosition += details.delta;
-                });
-              },
-              child: Material(
-                elevation: 10,
-                borderRadius: BorderRadius.circular(26),
-                color: const Color(0xFF131C24),
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(14, 6, 8, 6),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(26),
-                    border: Border.all(
-                      color: const Color(0xFF354961),
-                      width: 1.5,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 10,
-                        height: 10,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF22C55E),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 140),
-                        child: Text(
-                          _activeInAppCallStudent!.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      IconButton(
-                        key: const Key('end_call_button'),
-                        tooltip: 'End Call',
-                        icon: const Icon(
-                          Icons.call_end,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                        style: IconButton.styleFrom(
-                          backgroundColor: const Color(0xFFE65151),
-                          padding: const EdgeInsets.all(8),
-                        ),
-                        onPressed: _endActiveCall,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
       ],
     ),
   ),
@@ -1522,14 +1452,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
     );
-  }
-
-  Future<void> _endActiveCall() async {
-    setState(() {
-      _activeInAppCallStudent = null;
-      _pendingCallStudent = null;
-      _callStartedAt = null;
-    });
   }
 
   Future<int?> _showSimChoiceSheet(
@@ -1801,10 +1723,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _pendingCallStudent = student;
           _callStartedAt = DateTime.now();
 
-          setState(() {
-            _activeInAppCallStudent = student;
-          });
-
           final success = await CallerIdService.directCall(
             phone: student.phone,
             simSlot: preferredSlot,
@@ -1834,15 +1752,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _checkAndLogCallDuration() async {
-    if (_activeInAppCallStudent != null) {
-      setState(() {
-        _activeInAppCallStudent = null;
-        _pendingCallStudent = null;
-        _callStartedAt = null;
-      });
-      return;
-    }
-
     if (_pendingCallStudent != null && _callStartedAt != null) {
       _pendingCallStudent = null;
       _callStartedAt = null;

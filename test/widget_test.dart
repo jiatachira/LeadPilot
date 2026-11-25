@@ -427,7 +427,7 @@ void main() {
     expect(shape.side.width, 1.0);
     expect(find.text('0700000000'), findsOneWidget);
     final name = tester.widget<Text>(find.text(fullName));
-    expect(name.maxLines, 1);
+    expect(name.maxLines, 2);
     expect(name.overflow, TextOverflow.ellipsis);
     expect(find.text('3d'), findsNothing);
   });
@@ -4486,13 +4486,13 @@ void main() {
   );
 
   testWidgets(
-    'StudentCard has direct 1-tap WhatsApp and Call buttons on card',
+    'StudentCard has direct 1-tap History and Call buttons on card, and EditStudentSheet has WhatsApp next to Call',
     (tester) async {
       bool callTapped = false;
-      bool waTapped = false;
+      bool waTappedOnCard = false;
       bool historyTapped = false;
 
-      const student = Student(name: 'Quick Lead', phone: '0719876543');
+      const student = Student(name: 'Quick Lead With A Full Long Name', phone: '0719876543');
 
       await tester.pumpWidget(
         MaterialApp(
@@ -4502,7 +4502,7 @@ void main() {
               onTap: () {},
               onLongPress: () {},
               onCall: () => callTapped = true,
-              onWhatsApp: () => waTapped = true,
+              onWhatsApp: () => waTappedOnCard = true,
               onSms: () {},
               onNote: () => historyTapped = true,
               onSaveContact: () {},
@@ -4513,17 +4513,34 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byTooltip('Call student'), findsOneWidget);
-      expect(find.byTooltip('WhatsApp chat'), findsOneWidget);
       expect(find.byTooltip('Call history'), findsOneWidget);
+      expect(find.byTooltip('WhatsApp chat'), findsNothing);
 
       await tester.tap(find.byTooltip('Call student'));
       expect(callTapped, isTrue);
 
-      await tester.tap(find.byTooltip('WhatsApp chat'));
-      expect(waTapped, isTrue);
-
       await tester.tap(find.byTooltip('Call history'));
       expect(historyTapped, isTrue);
+      expect(waTappedOnCard, isFalse);
+
+      // Now verify EditStudentSheet header has WhatsApp button next to Call button
+      Student? waStudent;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: EditStudentSheet(
+              student: student,
+              onWhatsApp: (s) => waStudent = s,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip('WhatsApp ${student.name}'), findsOneWidget);
+      expect(find.byTooltip('Call ${student.name}'), findsOneWidget);
+      await tester.tap(find.byTooltip('WhatsApp ${student.name}'));
+      expect(waStudent?.name, student.name);
     },
   );
 

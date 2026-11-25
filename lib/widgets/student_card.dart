@@ -113,7 +113,7 @@ class StudentCard extends StatelessWidget {
                           ),
                   ),
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -125,7 +125,7 @@ class StudentCard extends StatelessWidget {
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
                         ),
-                        maxLines: 1,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 3),
@@ -182,9 +182,15 @@ class StudentCard extends StatelessWidget {
                   ),
                 ),
                 if (!isSelectionMode) ...[
+                  const SizedBox(width: 4),
                   IconButton(
                     tooltip: 'Call history',
                     visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 36,
+                      minHeight: 36,
+                    ),
                     onPressed: onNote,
                     icon: Icon(
                       Icons.history_rounded,
@@ -192,16 +198,7 @@ class StudentCard extends StatelessWidget {
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  IconButton(
-                    tooltip: 'WhatsApp chat',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onWhatsApp,
-                    icon: const FaIcon(
-                      FontAwesomeIcons.whatsapp,
-                      size: 20,
-                      color: Color(0xFF25D366),
-                    ),
-                  ),
+                  const SizedBox(width: 2),
                   IconButton.filled(
                     tooltip: 'Call student',
                     style: IconButton.styleFrom(
@@ -213,6 +210,7 @@ class StudentCard extends StatelessWidget {
                     icon: const Icon(Icons.call_rounded, size: 20),
                   ),
                   PopupMenuButton<String>(
+                    padding: EdgeInsets.zero,
                     icon: Icon(
                       Icons.more_vert_rounded,
                       color: theme.colorScheme.onSurfaceVariant,
