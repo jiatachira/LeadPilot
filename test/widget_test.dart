@@ -3785,7 +3785,7 @@ void main() {
       await tester.tap(checkBtn);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
-      expect(find.text('LeadPilot is up to date (v1.30.0).'), findsOneWidget);
+      expect(find.text('LeadPilot is up to date (v1.31.0).'), findsOneWidget);
 
       // Toggle Auto-check
       final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
@@ -4436,9 +4436,9 @@ void main() {
   });
 
   test(
-    'Clean Architecture: exports all modular components and version is 1.30.0',
+    'Clean Architecture: exports all modular components and version is 1.31.0',
     () {
-      expect(kAppVersion, '1.30.0');
+      expect(kAppVersion, '1.31.0');
       final store = MemoryAppSettingsStore();
       expect(store, isNotNull);
       const student = Student(name: 'Enterprise Lead', phone: '0771234567');
