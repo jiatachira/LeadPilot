@@ -45,6 +45,7 @@ part 'services/app_update_service.dart';
 part 'services/app_installer_service.dart';
 part 'widgets/dialogs/app_update_dialog.dart';
 part 'screens/home_screen.dart';
+part 'screens/recents_screen.dart';
 part 'widgets/dialogs/student_history_dialog.dart';
 part 'widgets/dialogs/lead_filter_sheet.dart';
 part 'widgets/student_card.dart';

@@ -473,6 +473,52 @@ class MainActivity : FlutterFragmentActivity() {
                             result.error("CALL_ERROR", e.message, null)
                         }
                     }
+                    "isAutoRecordEnabled" -> result.success(CallRecorderManager.isAutoRecordEnabled(this))
+                    "setAutoRecordEnabled" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        CallRecorderManager.setAutoRecordEnabled(this, enabled)
+                        result.success(null)
+                    }
+                    "startRecording" -> {
+                        val phone = call.argument<String>("phone") ?: ""
+                        result.success(CallRecorderManager.startRecording(this, phone))
+                    }
+                    "stopRecording" -> result.success(CallRecorderManager.stopRecording())
+                    "listRecordings" -> result.success(CallRecorderManager.listRecordings(this))
+                    "deleteRecording" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        result.success(CallRecorderManager.deleteRecording(path))
+                    }
+                    "playRecording" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        result.success(CallRecorderManager.playRecording(path))
+                    }
+                    "stopPlayback" -> { CallRecorderManager.stopPlayback(); result.success(null) }
+                    "getPlaybackStatus" -> result.success(CallRecorderManager.getPlaybackStatus())
+                    "getCallHistory" -> {
+                        try {
+                            val list = CallerIdCacheManager.getCallLogs(applicationContext).map { obj ->
+                                mapOf(
+                                    "phone" to obj.optString("phone"),
+                                    "duration" to obj.optLong("duration"),
+                                    "type" to obj.optString("type"),
+                                    "timestamp" to obj.optLong("timestamp")
+                                )
+                            }
+                            result.success(list)
+                        } catch (e: Exception) {
+                            result.error("CALL_HISTORY_ERROR", e.message, null)
+                        }
+                    }
+                    "getSystemCallLogs" -> {
+                        try {
+                            val limit = call.argument<Int>("limit") ?: 50
+                            val logs = getSystemCallLogs(limit)
+                            result.success(logs)
+                        } catch (e: Exception) {
+                            result.error("SYSTEM_LOG_ERROR", e.message, null)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -712,6 +758,42 @@ class MainActivity : FlutterFragmentActivity() {
             pendingCallPermissionResult?.success(granted)
             pendingCallPermissionResult = null
         }
+    }
+
+    private fun getSystemCallLogs(limit: Int): List<Map<String, Any>> {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) {
+            return emptyList()
+        }
+        val cr = contentResolver ?: return emptyList()
+        val cursor = cr.query(
+            CallLog.Calls.CONTENT_URI,
+            arrayOf(CallLog.Calls.NUMBER, CallLog.Calls.DURATION, CallLog.Calls.TYPE, CallLog.Calls.DATE),
+            null,
+            null,
+            "${CallLog.Calls.DATE} DESC"
+        ) ?: return emptyList()
+        val result = mutableListOf<Map<String, Any>>()
+        cursor.use { c ->
+            val numIdx = c.getColumnIndex(CallLog.Calls.NUMBER)
+            val durIdx = c.getColumnIndex(CallLog.Calls.DURATION)
+            val typeIdx = c.getColumnIndex(CallLog.Calls.TYPE)
+            val dateIdx = c.getColumnIndex(CallLog.Calls.DATE)
+            while (c.moveToNext() && result.size < limit) {
+                val number = if (numIdx >= 0) c.getString(numIdx) ?: "" else ""
+                val duration = if (durIdx >= 0) c.getLong(durIdx) else 0L
+                val type = if (typeIdx >= 0) c.getInt(typeIdx) else 0
+                val date = if (dateIdx >= 0) c.getLong(dateIdx) else 0L
+                val callTypeStr = when (type) {
+                    CallLog.Calls.INCOMING_TYPE -> "incoming"
+                    CallLog.Calls.OUTGOING_TYPE -> "outgoing"
+                    CallLog.Calls.MISSED_TYPE -> "missed"
+                    CallLog.Calls.REJECTED_TYPE -> "rejected"
+                    else -> "unknown"
+                }
+                result.add(mapOf("phone" to number, "duration" to duration, "type" to callTypeStr, "timestamp" to date))
+            }
+        }
+        return result
     }
 
     private fun stopCurrentRingtone() {

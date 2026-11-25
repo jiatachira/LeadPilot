@@ -947,11 +947,20 @@ class _CallingSettingsSubPage extends StatefulWidget {
 class _CallingSettingsSubPageState extends State<_CallingSettingsSubPage> {
   late bool _directCalling = widget.directCalling;
   bool? _isDefaultDialer;
+  bool _autoRecord = false;
 
   @override
   void initState() {
     super.initState();
     _refreshDefaultDialerStatus();
+    _loadAutoRecordStatus();
+  }
+
+  Future<void> _loadAutoRecordStatus() async {
+    try {
+      final val = await CallerIdService.isAutoRecordEnabled();
+      if (mounted) setState(() => _autoRecord = val);
+    } catch (_) {}
   }
 
   Future<void> _refreshDefaultDialerStatus() async {
@@ -1063,6 +1072,25 @@ class _CallingSettingsSubPageState extends State<_CallingSettingsSubPage> {
                           child: const Text('Set Default'),
                         ),
               onTap: _isDefaultDialer == true ? null : _requestDefaultDialer,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            color: theme.colorScheme.surfaceContainerLow,
+            child: SwitchListTile(
+              secondary: Icon(
+                Icons.fiber_manual_record_rounded,
+                color: _autoRecord ? Colors.red : null,
+              ),
+              title: const Text('Auto-Record Calls'),
+              subtitle: const Text(
+                'Automatically record calls locally when set as Default Phone App',
+              ),
+              value: _autoRecord,
+              onChanged: (val) async {
+                setState(() => _autoRecord = val);
+                await CallerIdService.setAutoRecordEnabled(val);
+              },
             ),
           ),
         ],

@@ -76,6 +76,8 @@ class InCallActivity : Activity(), CallStateListener {
     private lateinit var btnOpenApp: ImageButton
     private lateinit var btnAudio: ImageButton
     private lateinit var lblAudio: TextView
+    private lateinit var btnRecord: ImageButton
+    private lateinit var lblRecord: TextView
 
     private lateinit var dtmfPanel: LinearLayout
     private lateinit var tvDtmfDigits: TextView
@@ -151,6 +153,8 @@ class InCallActivity : Activity(), CallStateListener {
         btnOpenApp = findViewById(R.id.incall_btn_open_app)
         btnAudio = findViewById(R.id.incall_btn_audio)
         lblAudio = findViewById(R.id.incall_lbl_audio)
+        btnRecord = findViewById(R.id.incall_btn_record)
+        lblRecord = findViewById(R.id.incall_lbl_record)
 
         dtmfPanel = findViewById(R.id.incall_dtmf_panel)
         tvDtmfDigits = findViewById(R.id.incall_dtmf_digits)
@@ -217,6 +221,11 @@ class InCallActivity : Activity(), CallStateListener {
 
         btnOpenApp.setOnClickListener {
             openLeadPilotMain()
+        }
+
+        btnRecord.setOnClickListener {
+            LeadPilotCallManager.toggleRecording(applicationContext)
+            updateRecordButton()
         }
 
         btnSecondaryAction.setOnClickListener { LeadPilotCallManager.handleSecondaryAction() }
@@ -347,6 +356,19 @@ class InCallActivity : Activity(), CallStateListener {
 
         updateTimerText()
         updateProximitySensor(call.state, isSpeaker || isBluetooth)
+        updateRecordButton()
+    }
+
+    private fun updateRecordButton() {
+        val isRecording = CallRecorderManager.isRecording
+        val isActive = LeadPilotCallManager.primaryCall?.state == Call.STATE_ACTIVE
+        btnRecord.isEnabled = isActive
+        btnRecord.alpha = if (isActive) 1.0f else 0.4f
+        btnRecord.setBackgroundResource(if (isRecording) R.drawable.incall_btn_circle_active else R.drawable.incall_btn_circle)
+        btnRecord.setImageResource(if (isRecording) R.drawable.ic_incall_mic else R.drawable.ic_incall_mic_off)
+        btnRecord.setColorFilter(if (isRecording) Color.parseColor("#E53E3E") else Color.WHITE)
+        lblRecord.text = if (isRecording) "Recording..." else "Record"
+        lblRecord.setTextColor(if (isRecording) Color.parseColor("#FC8181") else Color.parseColor("#CBD5E1"))
     }
 
     private fun updateTimerText() {

@@ -4922,4 +4922,198 @@ void main() {
           .setMockMethodCallHandler(CallerIdService.channel, null);
     },
   );
+
+  testWidgets(
+    'Settings Calling page displays Auto-Record Calls toggle and persists state',
+    (tester) async {
+      bool autoRecordEnabled = false;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(CallerIdService.channel, (call) async {
+            if (call.method == 'isDefaultDialer') return true;
+            if (call.method == 'isAutoRecordEnabled') return autoRecordEnabled;
+            if (call.method == 'setAutoRecordEnabled') {
+              final args = call.arguments as Map?;
+              autoRecordEnabled = args?['enabled'] as bool? ?? false;
+              return null;
+            }
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(CallerIdService.channel, null);
+      });
+
+      final store = MemoryAppSettingsStore();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SettingsHubSheet(
+              themeMode: ThemeMode.system,
+              onThemeModeChanged: (_) async {},
+              isSheetConnected: true,
+              hasActiveFilters: false,
+              biometricEnabled: false,
+              onBiometricChanged: (_) async {},
+              settingsStore: store,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Calling'));
+      await tester.pumpAndSettle();
+
+      final autoRecordTitle = find.text('Auto-Record Calls');
+      await tester.ensureVisible(autoRecordTitle);
+      expect(autoRecordTitle, findsOneWidget);
+
+      await tester.tap(autoRecordTitle);
+      await tester.pumpAndSettle();
+
+      expect(autoRecordEnabled, isTrue);
+    },
+  );
+
+  testWidgets(
+    'RecentsScreen displays call history, matches leads, filters, and plays recordings',
+    (tester) async {
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      String? playedPath;
+      bool stopCalled = false;
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(CallerIdService.channel, (call) async {
+            if (call.method == 'getCallHistory') {
+              return [
+                {
+                  'phone': '0771234567',
+                  'duration': 45,
+                  'type': 'outgoing',
+                  'timestamp': nowMs - 60000,
+                },
+                {
+                  'phone': '0719998888',
+                  'duration': 0,
+                  'type': 'missed',
+                  'timestamp': nowMs - 120000,
+                },
+              ];
+            }
+            if (call.method == 'listRecordings') {
+              return [
+                {
+                  'path': '/tmp/call_0771234567.m4a',
+                  'phone': '0771234567',
+                  'timestampMs': nowMs - 105000,
+                  'sizeBytes': 24000,
+                },
+              ];
+            }
+            if (call.method == 'playRecording') {
+              playedPath = (call.arguments as Map?)?['path'] as String?;
+              return true;
+            }
+            if (call.method == 'stopPlayback') {
+              stopCalled = true;
+              return null;
+            }
+            if (call.method == 'getPlaybackStatus') {
+              return {'isPlaying': true};
+            }
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(CallerIdService.channel, null);
+      });
+
+      final students = [
+        const Student(
+          name: 'Kasun Silva',
+          phone: '0771234567',
+          callStatus: 'Interested',
+        ),
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RecentsScreen(
+            students: students,
+            onOpenStudent: (_) {},
+            onCallNumber: (_) async {},
+            onOpenDialpad: () {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Matched lead name & unmatched missed number both displayed
+      expect(find.text('Kasun Silva'), findsOneWidget);
+      expect(find.text('0719998888'), findsOneWidget);
+      expect(find.text('Play Recording'), findsOneWidget);
+
+      // Play recording
+      await tester.tap(find.text('Play Recording'));
+      await tester.pump();
+      expect(playedPath, '/tmp/call_0771234567.m4a');
+      expect(find.text('Stop'), findsOneWidget);
+
+      // Stop recording
+      await tester.tap(find.text('Stop'));
+      await tester.pump();
+      expect(stopCalled, isTrue);
+
+      // Filter by Missed
+      await tester.tap(find.text('Missed'));
+      await tester.pumpAndSettle();
+      expect(find.text('Kasun Silva'), findsNothing);
+      expect(find.text('0719998888'), findsOneWidget);
+
+      // Filter by Recorded
+      await tester.tap(find.text('Recorded'));
+      await tester.pumpAndSettle();
+      expect(find.text('Kasun Silva'), findsOneWidget);
+      expect(find.text('0719998888'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'HomeScreen switches between Leads and Recents tabs via bottom navigation',
+    (tester) async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(CallerIdService.channel, (call) async {
+            if (call.method == 'getCallHistory') return [];
+            if (call.method == 'getSystemCallLogs') return [];
+            if (call.method == 'listRecordings') return [];
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(CallerIdService.channel, null);
+      });
+
+      await tester.pumpWidget(testApp());
+      await tester.pumpAndSettle();
+
+      await enterPin(tester, '2580');
+      await tester.pumpAndSettle();
+      await enterPin(tester, '2580');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Leads'), findsOneWidget);
+      expect(find.text('Recents'), findsOneWidget);
+
+      await tester.tap(find.text('Recents'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Recent Calls'), findsOneWidget);
+      expect(find.text('No recent calls'), findsOneWidget);
+      expect(find.byIcon(Icons.dialpad_rounded), findsOneWidget);
+
+      await tester.tap(find.text('Leads'));
+      await tester.pumpAndSettle();
+      expect(find.text('LeadPilot'), findsOneWidget);
+    },
+  );
 }
