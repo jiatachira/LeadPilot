@@ -262,15 +262,17 @@ object CallerIdCacheManager {
             val now = System.currentTimeMillis()
             val norm = normalizePhoneNumber(phone)
 
-            // Deduplicate if an entry for this number exists within 30 seconds
+            // Deduplicate: skip if same number recorded within 2 minutes (120s)
+            // This handles cases where both LeadPilotCallManager AND PhoneStateReceiver
+            // might try to log the same call
             val isDuplicate = existing.any { obj ->
                 val prevPhone = obj.optString("phone")
                 val prevTs = obj.optLong("timestamp")
                 val sameNumber = (prevPhone == phone) || (norm.isNotEmpty() && normalizePhoneNumber(prevPhone) == norm)
-                sameNumber && Math.abs(now - prevTs) < 30000L
+                sameNumber && Math.abs(now - prevTs) < 120000L
             }
             if (isDuplicate) {
-                Log.d(TAG, "addCallLog: Skipping duplicate entry for $phone within 30s")
+                Log.d(TAG, "addCallLog: Skipping duplicate entry for $phone within 2 minutes")
                 return
             }
 

@@ -112,7 +112,18 @@ object CallRecorderManager {
 
         val sanitizedPhone = phone.replace(Regex("[^0-9+]"), "").ifBlank { "unknown" }
         val timestamp = System.currentTimeMillis()
-        val outFile = File(getRecordingsDir(context), "call_${sanitizedPhone}_$timestamp.m4a")
+
+        // Always record to app-private external files dir to avoid scoped storage issues
+        val recordingDir = try {
+            val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, RECORDINGS_DIR)
+            if (!dir.exists()) dir.mkdirs()
+            dir
+        } catch (_: Exception) {
+            val dir = File(context.filesDir, RECORDINGS_DIR)
+            if (!dir.exists()) dir.mkdirs()
+            dir
+        }
+        val outFile = File(recordingDir, "call_${sanitizedPhone}_$timestamp.m4a")
 
         val sources = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             listOf(
@@ -126,6 +137,9 @@ object CallRecorderManager {
                 MediaRecorder.AudioSource.MIC
             )
         }
+
+        // Try each audio source until one succeeds
+        var lastError: String? = null
 
         for (source in sources) {
             var mr: MediaRecorder? = null
@@ -197,15 +211,20 @@ object CallRecorderManager {
     }
 
     fun listRecordings(context: Context): List<Map<String, Any>> {
-        val currentDir = getRecordingsDir(context)
-        val internalDir = File(context.getExternalFilesDir(null) ?: context.filesDir, RECORDINGS_DIR)
-        val dirs = listOfNotNull(currentDir, internalDir).distinctBy { it.absolutePath }
+        // Always scan both the user-selected dir AND app-private external files dir
+        val selectedDir = getRecordingsDir(context)
+        val appPrivateDir = File(context.getExternalFilesDir(null) ?: context.filesDir, RECORDINGS_DIR)
+        val appInternalDir = File(context.filesDir, RECORDINGS_DIR)
+        val dirsToScan = listOfNotNull(selectedDir, appPrivateDir, appInternalDir)
+            .distinctBy { it.absolutePath }
 
         val allFiles = mutableListOf<File>()
-        for (dir in dirs) {
+        for (dir in dirsToScan) {
             if (dir.exists() && dir.isDirectory) {
                 dir.listFiles { file ->
-                    file.isFile && (file.name.endsWith(".m4a") || file.name.endsWith(".mp4") || file.name.endsWith(".3gp")) && file.length() > 512
+                    file.isFile &&
+                    (file.name.endsWith(".m4a") || file.name.endsWith(".mp4") || file.name.endsWith(".3gp")) &&
+                    file.length() > 512
                 }?.let { allFiles.addAll(it) }
             }
         }
@@ -248,7 +267,10 @@ object CallRecorderManager {
 
             if (context != null) {
                 val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-                am?.mode = AudioManager.MODE_NORMAL
+                // MODE_IN_COMMUNICATION causes issues for playback - use NORMAL
+                if (am?.mode != AudioManager.MODE_NORMAL) {
+                    am?.mode = AudioManager.MODE_NORMAL
+                }
                 am?.isSpeakerphoneOn = false
             }
 

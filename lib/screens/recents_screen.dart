@@ -52,57 +52,61 @@ class _RecentsScreenState extends State<RecentsScreen> {
     if (!mounted) return;
     setState(() => _isLoading = true);
     try {
-      final internalLogs = await CallerIdService.getCallHistory();
-      final systemLogs = await CallerIdService.getSystemCallLogs(limit: 150);
+      // Use system call log as the SOLE source of truth for call history.
+      // Internal logs are only used as a fallback when system log permission is denied.
+      final systemLogs = await CallerIdService.getSystemCallLogs(limit: 200);
 
-      // Merge logs: prioritize system call logs (device ground truth),
-      // then include any internalLogs not already present.
-      final mergedLogs = <Map<String, dynamic>>[...systemLogs];
-      for (final internal in internalLogs) {
-        final iPhone = _digitsOnly(internal['phone'] as String? ?? '');
-        final iTs = (internal['timestamp'] as num?)?.toInt() ?? 0;
-        final alreadyPresent = mergedLogs.any((sys) {
-          final sPhone = _digitsOnly(sys['phone'] as String? ?? '');
-          final sTs = (sys['timestamp'] as num?)?.toInt() ?? 0;
-          return (sPhone == iPhone ||
-                  sPhone.endsWith(iPhone) ||
-                  iPhone.endsWith(sPhone)) &&
-              (sTs - iTs).abs() < 15000;
-        });
-        if (!alreadyPresent) {
-          mergedLogs.add(internal);
+      List<Map<String, dynamic>> sourceLogs;
+      if (systemLogs.isNotEmpty) {
+        // System log available — deduplicate within 2 minutes for same number
+        sourceLogs = [];
+        for (final log in systemLogs) {
+          final phone = _digitsOnly(log['phone'] as String? ?? '');
+          final ts = (log['timestamp'] as num?)?.toInt() ?? 0;
+          final type = log['type'] as String? ?? '';
+          final isDuplicate = sourceLogs.any((existing) {
+            final ePhone = _digitsOnly(existing['phone'] as String? ?? '');
+            final eTs = (existing['timestamp'] as num?)?.toInt() ?? 0;
+            final eType = existing['type'] as String? ?? '';
+            final sameNum = phone.isNotEmpty &&
+                ePhone.isNotEmpty &&
+                (phone == ePhone ||
+                    (phone.length >= 7 && ePhone.endsWith(phone)) ||
+                    (ePhone.length >= 7 && phone.endsWith(ePhone)));
+            return sameNum && type == eType && (ts - eTs).abs() < 120000;
+          });
+          if (!isDuplicate) sourceLogs.add(log);
         }
-      }
-
-      mergedLogs.sort((a, b) {
-        final tsA = (a['timestamp'] as num?)?.toInt() ?? 0;
-        final tsB = (b['timestamp'] as num?)?.toInt() ?? 0;
-        return tsB.compareTo(tsA);
-      });
-
-      // Deduplicate close entries (same contact/phone within 30 seconds)
-      final uniqueLogs = <Map<String, dynamic>>[];
-      for (final log in mergedLogs) {
-        final phone = _digitsOnly(log['phone'] as String? ?? '');
-        final ts = (log['timestamp'] as num?)?.toInt() ?? 0;
-        final isDuplicate = uniqueLogs.any((existing) {
-          final ePhone = _digitsOnly(existing['phone'] as String? ?? '');
-          final eTs = (existing['timestamp'] as num?)?.toInt() ?? 0;
-          final sameNum = (phone.isNotEmpty && ePhone.isNotEmpty) &&
-              (phone == ePhone ||
-                  (phone.length >= 7 && ePhone.endsWith(phone)) ||
-                  (ePhone.length >= 7 && phone.endsWith(ePhone)));
-          return sameNum && (ts - eTs).abs() < 30000;
-        });
-        if (!isDuplicate) {
-          uniqueLogs.add(log);
+      } else {
+        // Fallback: internal logs when system log not accessible
+        final internalLogs = await CallerIdService.getCallHistory();
+        sourceLogs = [];
+        for (final log in internalLogs) {
+          final phone = _digitsOnly(log['phone'] as String? ?? '');
+          final ts = (log['timestamp'] as num?)?.toInt() ?? 0;
+          final isDuplicate = sourceLogs.any((existing) {
+            final ePhone = _digitsOnly(existing['phone'] as String? ?? '');
+            final eTs = (existing['timestamp'] as num?)?.toInt() ?? 0;
+            final sameNum = phone.isNotEmpty &&
+                ePhone.isNotEmpty &&
+                (phone == ePhone ||
+                    (phone.length >= 7 && ePhone.endsWith(phone)) ||
+                    (ePhone.length >= 7 && phone.endsWith(ePhone)));
+            return sameNum && (ts - eTs).abs() < 120000;
+          });
+          if (!isDuplicate) sourceLogs.add(log);
         }
+        sourceLogs.sort((a, b) {
+          final tsA = (a['timestamp'] as num?)?.toInt() ?? 0;
+          final tsB = (b['timestamp'] as num?)?.toInt() ?? 0;
+          return tsB.compareTo(tsA);
+        });
       }
 
       final recordings = await CallerIdService.listRecordings();
       if (!mounted) return;
       setState(() {
-        _callLogs = uniqueLogs;
+        _callLogs = sourceLogs;
         _recordings = recordings;
         _isLoading = false;
       });

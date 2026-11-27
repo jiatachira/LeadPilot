@@ -3785,7 +3785,7 @@ void main() {
       await tester.tap(checkBtn);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
-      expect(find.text('LeadPilot is up to date (v1.32.3).'), findsOneWidget);
+      expect(find.text('LeadPilot is up to date (v1.32.4).'), findsOneWidget);
 
       // Toggle Auto-check
       final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
@@ -4436,9 +4436,9 @@ void main() {
   });
 
   test(
-    'Clean Architecture: exports all modular components and version is 1.32.3',
+    'Clean Architecture: exports all modular components and version is 1.32.4',
     () {
-      expect(kAppVersion, '1.32.3');
+      expect(kAppVersion, '1.32.4');
       final store = MemoryAppSettingsStore();
       expect(store, isNotNull);
       const student = Student(name: 'Enterprise Lead', phone: '0771234567');
@@ -5153,6 +5153,13 @@ void main() {
                   'type': 'rejected',
                   'timestamp': nowMs - 30000,
                 },
+                // Also put the internal call in system logs so the new logic picks it up
+                {
+                  'phone': '0771112233',
+                  'duration': 65,
+                  'type': 'incoming',
+                  'timestamp': nowMs - 50000,
+                },
               ];
             }
             if (call.method == 'listRecordings') return [];
@@ -5223,16 +5230,17 @@ void main() {
     binding.setMockMethodCallHandler(
       const MethodChannel('com.example.call_dial/caller_id'),
       (call) async {
-        if (call.method == 'getCallHistory') {
+        if (call.method == 'getSystemCallLogs') {
+          // Return system logs that already have duplicates (same number within 10s)
           return [
             {'phone': '0771234567', 'timestamp': now, 'duration': 15, 'type': 'outgoing'},
-            // Duplicate within 10s:
+            // Duplicate within 10s - should be deduplicated:
             {'phone': '0771234567', 'timestamp': now - 10000, 'duration': 15, 'type': 'outgoing'},
             // Different call earlier:
             {'phone': '0779998888', 'timestamp': now - 60000, 'duration': 5, 'type': 'incoming'},
           ];
         }
-        if (call.method == 'getSystemCallLogs') return [];
+        if (call.method == 'getCallHistory') return [];
         if (call.method == 'listRecordings') return [];
         return null;
       },
