@@ -479,6 +479,17 @@ class MainActivity : FlutterFragmentActivity() {
                         CallRecorderManager.setAutoRecordEnabled(this, enabled)
                         result.success(null)
                     }
+                    "getRecordingStorageLocation" -> {
+                        result.success(CallRecorderManager.getRecordingStorageLocation(this))
+                    }
+                    "setRecordingStorageLocation" -> {
+                        val location = call.argument<String>("location") ?: "music"
+                        CallRecorderManager.setRecordingStorageLocation(this, location)
+                        result.success(null)
+                    }
+                    "getRecordingStoragePath" -> {
+                        result.success(CallRecorderManager.getRecordingsDir(this).absolutePath)
+                    }
                     "startRecording" -> {
                         val phone = call.argument<String>("phone") ?: ""
                         result.success(CallRecorderManager.startRecording(this, phone))
@@ -491,7 +502,7 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                     "playRecording" -> {
                         val path = call.argument<String>("path") ?: ""
-                        result.success(CallRecorderManager.playRecording(path))
+                        result.success(CallRecorderManager.playRecording(path, this))
                     }
                     "stopPlayback" -> { CallRecorderManager.stopPlayback(); result.success(null) }
                     "getPlaybackStatus" -> result.success(CallRecorderManager.getPlaybackStatus())

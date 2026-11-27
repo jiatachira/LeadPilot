@@ -3,18 +3,28 @@ package com.example.call_dial
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.MediaRecorder
+import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.util.Log
 import androidx.core.content.ContextCompat
 import java.io.File
+import java.io.FileInputStream
 
 object CallRecorderManager {
     private const val TAG = "CallRecorderManager"
     private const val PREFS_NAME = "leadpilot_caller_id_prefs"
     private const val KEY_AUTO_RECORD = "auto_record_calls"
+    private const val KEY_STORAGE_LOCATION = "recording_storage_location"
     private const val RECORDINGS_DIR = "CallRecordings"
+
+    const val LOCATION_MUSIC = "music"
+    const val LOCATION_DOCUMENTS = "documents"
+    const val LOCATION_APP_INTERNAL = "internal"
 
     private var recorder: MediaRecorder? = null
     private var currentFile: File? = null
@@ -42,11 +52,53 @@ object CallRecorderManager {
             .apply()
     }
 
+    fun getRecordingStorageLocation(context: Context): String {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_STORAGE_LOCATION, LOCATION_MUSIC) ?: LOCATION_MUSIC
+    }
+
+    fun setRecordingStorageLocation(context: Context, locationKey: String) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_STORAGE_LOCATION, locationKey)
+            .apply()
+    }
+
     fun getRecordingsDir(context: Context): File {
-        val base = context.getExternalFilesDir(null) ?: context.filesDir
-        val dir = File(base, RECORDINGS_DIR)
-        if (!dir.exists()) {
-            dir.mkdirs()
+        val location = getRecordingStorageLocation(context)
+        val dir = try {
+            when (location) {
+                LOCATION_DOCUMENTS -> {
+                    val docDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+                    File(docDir, "LeadPilotRecordings")
+                }
+                LOCATION_APP_INTERNAL -> {
+                    val base = context.getExternalFilesDir(null) ?: context.filesDir
+                    File(base, RECORDINGS_DIR)
+                }
+                else -> { // LOCATION_MUSIC (Default)
+                    val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+                    File(musicDir, "LeadPilotRecordings")
+                }
+            }
+        } catch (_: Exception) {
+            val base = context.getExternalFilesDir(null) ?: context.filesDir
+            File(base, RECORDINGS_DIR)
+        }
+
+        try {
+            if (!dir.exists()) {
+                val created = dir.mkdirs()
+                if (!created && !dir.exists()) {
+                    val fallback = File(context.getExternalFilesDir(null) ?: context.filesDir, RECORDINGS_DIR)
+                    if (!fallback.exists()) fallback.mkdirs()
+                    return fallback
+                }
+            }
+        } catch (_: Exception) {
+            val fallback = File(context.getExternalFilesDir(null) ?: context.filesDir, RECORDINGS_DIR)
+            if (!fallback.exists()) fallback.mkdirs()
+            return fallback
         }
         return dir
     }
@@ -62,11 +114,18 @@ object CallRecorderManager {
         val timestamp = System.currentTimeMillis()
         val outFile = File(getRecordingsDir(context), "call_${sanitizedPhone}_$timestamp.m4a")
 
-        val sources = listOf(
-            MediaRecorder.AudioSource.VOICE_CALL,
-            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-            MediaRecorder.AudioSource.MIC
-        )
+        val sources = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            listOf(
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                MediaRecorder.AudioSource.MIC
+            )
+        } else {
+            listOf(
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                MediaRecorder.AudioSource.VOICE_CALL,
+                MediaRecorder.AudioSource.MIC
+            )
+        }
 
         for (source in sources) {
             var mr: MediaRecorder? = null
@@ -98,7 +157,7 @@ object CallRecorderManager {
                     mr?.reset()
                     mr?.release()
                 } catch (_: Exception) {}
-                if (outFile.exists()) {
+                if (outFile.exists() && outFile.length() == 0L) {
                     outFile.delete()
                 }
             }
@@ -117,9 +176,6 @@ object CallRecorderManager {
             recorder?.stop()
         } catch (e: Exception) {
             Log.w(TAG, "stop() error: ${e.message}")
-            try {
-                currentFile?.delete()
-            } catch (_: Exception) {}
         } finally {
             try {
                 recorder?.reset()
@@ -130,21 +186,31 @@ object CallRecorderManager {
             recordingStartedAtMs = 0L
             currentFile = null
         }
-        return if (savedPath != null && File(savedPath).exists() && File(savedPath).length() > 0) {
+        return if (savedPath != null && File(savedPath).exists() && File(savedPath).length() > 512) {
             savedPath
         } else {
+            try {
+                if (savedPath != null) File(savedPath).delete()
+            } catch (_: Exception) {}
             null
         }
     }
 
     fun listRecordings(context: Context): List<Map<String, Any>> {
-        val dir = getRecordingsDir(context)
-        val files = dir.listFiles { file ->
-            file.isFile && (file.name.endsWith(".m4a") || file.name.endsWith(".mp4") || file.name.endsWith(".3gp")) && file.length() > 0
-        } ?: return emptyList()
+        val currentDir = getRecordingsDir(context)
+        val internalDir = File(context.getExternalFilesDir(null) ?: context.filesDir, RECORDINGS_DIR)
+        val dirs = listOfNotNull(currentDir, internalDir).distinctBy { it.absolutePath }
 
-        return files.sortedByDescending { it.lastModified() }.map { file ->
-            // Expected format: call_<phone>_<timestampMs>.m4a
+        val allFiles = mutableListOf<File>()
+        for (dir in dirs) {
+            if (dir.exists() && dir.isDirectory) {
+                dir.listFiles { file ->
+                    file.isFile && (file.name.endsWith(".m4a") || file.name.endsWith(".mp4") || file.name.endsWith(".3gp")) && file.length() > 512
+                }?.let { allFiles.addAll(it) }
+            }
+        }
+
+        return allFiles.distinctBy { it.name }.sortedByDescending { it.lastModified() }.map { file ->
             val baseName = file.nameWithoutExtension
             val parts = baseName.split("_")
             val phone = if (parts.size >= 3) parts[1] else ""
@@ -171,21 +237,45 @@ object CallRecorderManager {
         }
     }
 
-    fun playRecording(path: String): Boolean {
+    fun playRecording(path: String, context: Context? = null): Boolean {
         stopPlayback()
         return try {
             val file = File(path)
-            if (!file.exists()) return false
+            if (!file.exists() || file.length() == 0L) {
+                Log.w(TAG, "File does not exist or is empty: $path")
+                return false
+            }
+
+            if (context != null) {
+                val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                am?.mode = AudioManager.MODE_NORMAL
+                am?.isSpeakerphoneOn = false
+            }
+
+            val fis = FileInputStream(file)
             val mp = MediaPlayer().apply {
-                setDataSource(path)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    setAudioStreamType(AudioManager.STREAM_MUSIC)
+                }
+                setDataSource(fis.fd)
                 prepare()
                 setOnCompletionListener {
                     stopPlayback()
                 }
                 start()
             }
+            fis.close()
             player = mp
             playingPath = path
+            Log.d(TAG, "Successfully started playback: $path (size=${file.length()})")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to play recording", e)

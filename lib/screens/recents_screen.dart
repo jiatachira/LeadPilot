@@ -80,10 +80,29 @@ class _RecentsScreenState extends State<RecentsScreen> {
         return tsB.compareTo(tsA);
       });
 
+      // Deduplicate close entries (same contact/phone within 30 seconds)
+      final uniqueLogs = <Map<String, dynamic>>[];
+      for (final log in mergedLogs) {
+        final phone = _digitsOnly(log['phone'] as String? ?? '');
+        final ts = (log['timestamp'] as num?)?.toInt() ?? 0;
+        final isDuplicate = uniqueLogs.any((existing) {
+          final ePhone = _digitsOnly(existing['phone'] as String? ?? '');
+          final eTs = (existing['timestamp'] as num?)?.toInt() ?? 0;
+          final sameNum = (phone.isNotEmpty && ePhone.isNotEmpty) &&
+              (phone == ePhone ||
+                  (phone.length >= 7 && ePhone.endsWith(phone)) ||
+                  (ePhone.length >= 7 && phone.endsWith(ePhone)));
+          return sameNum && (ts - eTs).abs() < 30000;
+        });
+        if (!isDuplicate) {
+          uniqueLogs.add(log);
+        }
+      }
+
       final recordings = await CallerIdService.listRecordings();
       if (!mounted) return;
       setState(() {
-        _callLogs = mergedLogs;
+        _callLogs = uniqueLogs;
         _recordings = recordings;
         _isLoading = false;
       });
@@ -189,6 +208,14 @@ class _RecentsScreenState extends State<RecentsScreen> {
       if (_playingPath != null) await CallerIdService.stopPlayback();
       final ok = await CallerIdService.playRecording(path);
       if (!mounted) return;
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not play recording or file is unavailable'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
       setState(() {
         _playingPath = ok ? path : null;
         _isPlaying = ok;

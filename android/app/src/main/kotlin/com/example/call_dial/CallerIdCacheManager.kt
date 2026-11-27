@@ -200,18 +200,30 @@ object CallerIdCacheManager {
         try {
             val prefs = context.getSharedPreferences(PREFS_PENDING_CALLS, Context.MODE_PRIVATE)
             val existing = getPendingCallLogs(context).toMutableList()
-            val obj = JSONObject().apply {
-                put("phone", phone)
-                put("duration", durationSec)
-                put("type", callType)
-                put("timestamp", System.currentTimeMillis())
+            val now = System.currentTimeMillis()
+            val norm = normalizePhoneNumber(phone)
+
+            val isDuplicate = existing.any { obj ->
+                val prevPhone = obj.optString("phone")
+                val prevTs = obj.optLong("timestamp")
+                val sameNumber = (prevPhone == phone) || (norm.isNotEmpty() && normalizePhoneNumber(prevPhone) == norm)
+                sameNumber && Math.abs(now - prevTs) < 30000L
             }
-            existing.add(obj)
-            val arr = JSONArray()
-            for (item in existing) {
-                arr.put(item)
+
+            if (!isDuplicate) {
+                val obj = JSONObject().apply {
+                    put("phone", phone)
+                    put("duration", durationSec)
+                    put("type", callType)
+                    put("timestamp", now)
+                }
+                existing.add(obj)
+                val arr = JSONArray()
+                for (item in existing) {
+                    arr.put(item)
+                }
+                prefs.edit().putString(KEY_PENDING_LIST, arr.toString()).apply()
             }
-            prefs.edit().putString(KEY_PENDING_LIST, arr.toString()).apply()
             addCallLog(context, phone, durationSec, callType)
             Log.d(TAG, "addPendingCallLog: Saved call log for $phone (duration=${durationSec}s, type=$callType)")
         } catch (e: Exception) {
@@ -247,11 +259,26 @@ object CallerIdCacheManager {
         try {
             val prefs = context.getSharedPreferences(PREFS_CALL_HISTORY, Context.MODE_PRIVATE)
             val existing = getCallLogs(context).toMutableList()
+            val now = System.currentTimeMillis()
+            val norm = normalizePhoneNumber(phone)
+
+            // Deduplicate if an entry for this number exists within 30 seconds
+            val isDuplicate = existing.any { obj ->
+                val prevPhone = obj.optString("phone")
+                val prevTs = obj.optLong("timestamp")
+                val sameNumber = (prevPhone == phone) || (norm.isNotEmpty() && normalizePhoneNumber(prevPhone) == norm)
+                sameNumber && Math.abs(now - prevTs) < 30000L
+            }
+            if (isDuplicate) {
+                Log.d(TAG, "addCallLog: Skipping duplicate entry for $phone within 30s")
+                return
+            }
+
             val obj = JSONObject().apply {
                 put("phone", phone)
                 put("duration", durationSec)
                 put("type", callType)
-                put("timestamp", System.currentTimeMillis())
+                put("timestamp", now)
             }
             existing.add(0, obj) // newest first
             val trimmed = if (existing.size > MAX_CALL_HISTORY) existing.subList(0, MAX_CALL_HISTORY) else existing

@@ -948,12 +948,14 @@ class _CallingSettingsSubPageState extends State<_CallingSettingsSubPage> {
   late bool _directCalling = widget.directCalling;
   bool? _isDefaultDialer;
   bool _autoRecord = false;
+  String _storageLocation = 'music';
 
   @override
   void initState() {
     super.initState();
     _refreshDefaultDialerStatus();
     _loadAutoRecordStatus();
+    _loadStorageLocation();
   }
 
   Future<void> _loadAutoRecordStatus() async {
@@ -961,6 +963,112 @@ class _CallingSettingsSubPageState extends State<_CallingSettingsSubPage> {
       final val = await CallerIdService.isAutoRecordEnabled();
       if (mounted) setState(() => _autoRecord = val);
     } catch (_) {}
+  }
+
+  Future<void> _loadStorageLocation() async {
+    try {
+      final loc = await CallerIdService.getRecordingStorageLocation();
+      if (mounted) setState(() => _storageLocation = loc);
+    } catch (_) {}
+  }
+
+  String _storageLocationSubtitle(String loc) {
+    switch (loc) {
+      case 'documents':
+        return 'Documents/LeadPilotRecordings';
+      case 'internal':
+        return 'App Private Storage (Secure)';
+      case 'music':
+      default:
+        return 'Music/LeadPilotRecordings (Default)';
+    }
+  }
+
+  Future<void> _showStorageLocationPicker() async {
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                child: Text(
+                  'Recording Storage Location',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                child: Text(
+                  'Choose where your audio call recordings will be stored on this device.',
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                ),
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                leading: Icon(
+                  _storageLocation == 'music'
+                      ? Icons.radio_button_checked_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  color: _storageLocation == 'music'
+                      ? Theme.of(context).colorScheme.primary
+                      : null,
+                ),
+                title: const Text('Music Folder (Recommended)'),
+                subtitle: const Text('Music/LeadPilotRecordings • Easy to play in music apps'),
+                onTap: () => Navigator.pop(ctx, 'music'),
+              ),
+              ListTile(
+                leading: Icon(
+                  _storageLocation == 'documents'
+                      ? Icons.radio_button_checked_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  color: _storageLocation == 'documents'
+                      ? Theme.of(context).colorScheme.primary
+                      : null,
+                ),
+                title: const Text('Documents Folder'),
+                subtitle: const Text('Documents/LeadPilotRecordings • Standard docs location'),
+                onTap: () => Navigator.pop(ctx, 'documents'),
+              ),
+              ListTile(
+                leading: Icon(
+                  _storageLocation == 'internal'
+                      ? Icons.radio_button_checked_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  color: _storageLocation == 'internal'
+                      ? Theme.of(context).colorScheme.primary
+                      : null,
+                ),
+                title: const Text('App Private Storage'),
+                subtitle: const Text('Kept strictly private inside app storage sandbox'),
+                onTap: () => Navigator.pop(ctx, 'internal'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (selected != null && selected != _storageLocation) {
+      setState(() => _storageLocation = selected);
+      await CallerIdService.setRecordingStorageLocation(selected);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Storage set to ${_storageLocationSubtitle(selected)}'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _refreshDefaultDialerStatus() async {
@@ -1077,20 +1185,36 @@ class _CallingSettingsSubPageState extends State<_CallingSettingsSubPage> {
           const SizedBox(height: 12),
           Card(
             color: theme.colorScheme.surfaceContainerLow,
-            child: SwitchListTile(
-              secondary: Icon(
-                Icons.fiber_manual_record_rounded,
-                color: _autoRecord ? Colors.red : null,
-              ),
-              title: const Text('Auto-Record Calls'),
-              subtitle: const Text(
-                'Automatically record calls locally when set as Default Phone App',
-              ),
-              value: _autoRecord,
-              onChanged: (val) async {
-                setState(() => _autoRecord = val);
-                await CallerIdService.setAutoRecordEnabled(val);
-              },
+            child: Column(
+              children: [
+                SwitchListTile(
+                  secondary: Icon(
+                    Icons.fiber_manual_record_rounded,
+                    color: _autoRecord ? Colors.red : null,
+                  ),
+                  title: const Text('Auto-Record Calls'),
+                  subtitle: const Text(
+                    'Automatically record calls locally when set as Default Phone App',
+                  ),
+                  value: _autoRecord,
+                  onChanged: (val) async {
+                    setState(() => _autoRecord = val);
+                    await CallerIdService.setAutoRecordEnabled(val);
+                  },
+                ),
+                Divider(
+                  height: 1,
+                  indent: 56,
+                  color: theme.colorScheme.outlineVariant,
+                ),
+                ListTile(
+                  leading: const Icon(Icons.folder_outlined),
+                  title: const Text('Recording Storage Location'),
+                  subtitle: Text(_storageLocationSubtitle(_storageLocation)),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: _showStorageLocationPicker,
+                ),
+              ],
             ),
           ),
         ],

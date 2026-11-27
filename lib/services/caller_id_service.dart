@@ -319,6 +319,34 @@ class CallerIdService {
     } catch (_) {}
   }
 
+  static Future<String> getRecordingStorageLocation() async {
+    try {
+      return await channel.invokeMethod<String>('getRecordingStorageLocation') ?? 'music';
+    } on MissingPluginException {
+      return 'music';
+    } catch (_) {
+      return 'music';
+    }
+  }
+
+  static Future<void> setRecordingStorageLocation(String location) async {
+    try {
+      await channel.invokeMethod('setRecordingStorageLocation', {'location': location});
+    } on MissingPluginException {
+      // tests
+    } catch (_) {}
+  }
+
+  static Future<String> getRecordingStoragePath() async {
+    try {
+      return await channel.invokeMethod<String>('getRecordingStoragePath') ?? '';
+    } on MissingPluginException {
+      return '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   static Future<List<Map<String, dynamic>>> listRecordings() async {
     try {
       final res = await channel.invokeListMethod<dynamic>('listRecordings');

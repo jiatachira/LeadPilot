@@ -3785,7 +3785,7 @@ void main() {
       await tester.tap(checkBtn);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
-      expect(find.text('LeadPilot is up to date (v1.32.2).'), findsOneWidget);
+      expect(find.text('LeadPilot is up to date (v1.32.3).'), findsOneWidget);
 
       // Toggle Auto-check
       final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
@@ -4436,9 +4436,9 @@ void main() {
   });
 
   test(
-    'Clean Architecture: exports all modular components and version is 1.32.2',
+    'Clean Architecture: exports all modular components and version is 1.32.3',
     () {
-      expect(kAppVersion, '1.32.2');
+      expect(kAppVersion, '1.32.3');
       final store = MemoryAppSettingsStore();
       expect(store, isNotNull);
       const student = Student(name: 'Enterprise Lead', phone: '0771234567');
@@ -5192,4 +5192,68 @@ void main() {
       expect(find.text('1:05'), findsOneWidget);
     },
   );
+
+  test('Recording storage location defaults to music and allows setting updates', () async {
+    final binding = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    String location = 'music';
+    binding.setMockMethodCallHandler(
+      const MethodChannel('com.example.call_dial/caller_id'),
+      (call) async {
+        if (call.method == 'getRecordingStorageLocation') return location;
+        if (call.method == 'setRecordingStorageLocation') {
+          location = call.arguments['location'] as String? ?? 'music';
+          return null;
+        }
+        if (call.method == 'getRecordingStoragePath') return '/storage/emulated/0/Music';
+        return null;
+      },
+    );
+
+    expect(await CallerIdService.getRecordingStorageLocation(), 'music');
+    await CallerIdService.setRecordingStorageLocation('documents');
+    expect(await CallerIdService.getRecordingStorageLocation(), 'documents');
+    await CallerIdService.setRecordingStorageLocation('internal');
+    expect(await CallerIdService.getRecordingStorageLocation(), 'internal');
+    expect(await CallerIdService.getRecordingStoragePath(), isA<String>());
+  });
+
+  testWidgets('Recents screen deduplicates repeated calls within 30 seconds', (tester) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final binding = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    binding.setMockMethodCallHandler(
+      const MethodChannel('com.example.call_dial/caller_id'),
+      (call) async {
+        if (call.method == 'getCallHistory') {
+          return [
+            {'phone': '0771234567', 'timestamp': now, 'duration': 15, 'type': 'outgoing'},
+            // Duplicate within 10s:
+            {'phone': '0771234567', 'timestamp': now - 10000, 'duration': 15, 'type': 'outgoing'},
+            // Different call earlier:
+            {'phone': '0779998888', 'timestamp': now - 60000, 'duration': 5, 'type': 'incoming'},
+          ];
+        }
+        if (call.method == 'getSystemCallLogs') return [];
+        if (call.method == 'listRecordings') return [];
+        return null;
+      },
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RecentsScreen(
+            students: const [],
+            onOpenStudent: (_) {},
+            onCallNumber: (_) async {},
+            onOpenDialpad: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 0771234567 should be deduplicated to only appear once
+    expect(find.text('0771234567'), findsOneWidget);
+    expect(find.text('0779998888'), findsOneWidget);
+  });
 }
