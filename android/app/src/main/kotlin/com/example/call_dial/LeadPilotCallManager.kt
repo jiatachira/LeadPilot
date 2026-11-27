@@ -33,6 +33,8 @@ object LeadPilotCallManager {
     var currentAudioState: CallAudioState? = null
         private set
     private val callConnectTimes = ConcurrentHashMap<Call, Long>()
+    private val recordedCalls = java.util.Collections.newSetFromMap(ConcurrentHashMap<Call, Boolean>())
+    private val incomingCalls = java.util.Collections.newSetFromMap(ConcurrentHashMap<Call, Boolean>())
     private val dtmfHandler = Handler(Looper.getMainLooper())
     val callConnectedAtMs: Long
         get() = primaryCall?.let { callConnectTimes[it] } ?: 0L
@@ -169,21 +171,47 @@ object LeadPilotCallManager {
     }
 
     private fun recordEndedCall(context: Context, call: Call) {
+        if (!recordedCalls.add(call)) return
         val phone = getPhoneNumber(call)
+        if (phone.isBlank()) return
+
         val connectedAt = callConnectTimes[call] ?: 0L
-        if (phone.isNotBlank() && connectedAt > 0L) {
-            val durationSec = ((System.currentTimeMillis() - connectedAt) / 1000L).coerceAtLeast(0L)
-            val direction = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                if (call.details?.callDirection == Call.Details.DIRECTION_INCOMING) "incoming" else "outgoing"
-            } else {
-                "outgoing"
-            }
-            CallerIdCacheManager.addPendingCallLog(context, phone, durationSec, direction)
+        val durationSec = if (connectedAt > 0L) {
+            ((System.currentTimeMillis() - connectedAt) / 1000L).coerceAtLeast(0L)
+        } else {
+            0L
         }
+
+        val isIncoming = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            call.details?.callDirection == Call.Details.DIRECTION_INCOMING || incomingCalls.contains(call)
+        } else {
+            incomingCalls.contains(call)
+        }
+
+        val callType = if (isIncoming) {
+            if (connectedAt > 0L) {
+                "incoming"
+            } else {
+                val causeCode = call.details?.disconnectCause?.code ?: 0
+                if (causeCode == android.telecom.DisconnectCause.REJECTED) {
+                    "rejected"
+                } else {
+                    "missed"
+                }
+            }
+        } else {
+            "outgoing"
+        }
+
+        CallerIdCacheManager.addPendingCallLog(context, phone, durationSec, callType)
+        Log.d(TAG, "recordEndedCall: Logged $callType call for $phone (duration=${durationSec}s)")
     }
 
     fun onCallAdded(context: Context, call: Call) {
         call.registerCallback(callCallback)
+        if (call.state == Call.STATE_RINGING) {
+            incomingCalls.add(call)
+        }
         if (call.state == Call.STATE_ACTIVE && !callConnectTimes.containsKey(call)) {
             val systemConnectTime = call.details?.connectTimeMillis ?: 0L
             callConnectTimes[call] = if (systemConnectTime > 0L) systemConnectTime else System.currentTimeMillis()
@@ -210,10 +238,13 @@ object LeadPilotCallManager {
     }
 
     fun onCallRemoved(context: Context, call: Call) {
+        recordEndedCall(context, call)
         try {
             call.unregisterCallback(callCallback)
         } catch (_: Exception) {}
         callConnectTimes.remove(call)
+        incomingCalls.remove(call)
+        recordedCalls.remove(call)
 
         if (call == primaryCall) {
             primaryCall = secondaryCall

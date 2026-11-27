@@ -783,12 +783,15 @@ class MainActivity : FlutterFragmentActivity() {
                 val duration = if (durIdx >= 0) c.getLong(durIdx) else 0L
                 val type = if (typeIdx >= 0) c.getInt(typeIdx) else 0
                 val date = if (dateIdx >= 0) c.getLong(dateIdx) else 0L
-                val callTypeStr = when (type) {
-                    CallLog.Calls.INCOMING_TYPE -> "incoming"
-                    CallLog.Calls.OUTGOING_TYPE -> "outgoing"
-                    CallLog.Calls.MISSED_TYPE -> "missed"
-                    CallLog.Calls.REJECTED_TYPE -> "rejected"
-                    else -> "unknown"
+                val callTypeStr = when {
+                    type == CallLog.Calls.INCOMING_TYPE -> "incoming"
+                    type == CallLog.Calls.OUTGOING_TYPE -> "outgoing"
+                    type == CallLog.Calls.MISSED_TYPE -> "missed"
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && type == CallLog.Calls.REJECTED_TYPE -> "rejected"
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && type == CallLog.Calls.BLOCKED_TYPE -> "rejected"
+                    type == 3 -> "missed"
+                    type == 5 -> "rejected"
+                    else -> if (duration > 0L) "incoming" else "outgoing"
                 }
                 result.add(mapOf("phone" to number, "duration" to duration, "type" to callTypeStr, "timestamp" to date))
             }

@@ -52,16 +52,38 @@ class _RecentsScreenState extends State<RecentsScreen> {
     if (!mounted) return;
     setState(() => _isLoading = true);
     try {
-      // Load both internal history and system call log, preferring internal
-      // history when available and falling back to system call logs.
-      var logs = await CallerIdService.getCallHistory();
-      if (logs.isEmpty) {
-        logs = await CallerIdService.getSystemCallLogs(limit: 100);
+      final internalLogs = await CallerIdService.getCallHistory();
+      final systemLogs = await CallerIdService.getSystemCallLogs(limit: 150);
+
+      // Merge logs: prioritize system call logs (device ground truth),
+      // then include any internalLogs not already present.
+      final mergedLogs = <Map<String, dynamic>>[...systemLogs];
+      for (final internal in internalLogs) {
+        final iPhone = _digitsOnly(internal['phone'] as String? ?? '');
+        final iTs = (internal['timestamp'] as num?)?.toInt() ?? 0;
+        final alreadyPresent = mergedLogs.any((sys) {
+          final sPhone = _digitsOnly(sys['phone'] as String? ?? '');
+          final sTs = (sys['timestamp'] as num?)?.toInt() ?? 0;
+          return (sPhone == iPhone ||
+                  sPhone.endsWith(iPhone) ||
+                  iPhone.endsWith(sPhone)) &&
+              (sTs - iTs).abs() < 15000;
+        });
+        if (!alreadyPresent) {
+          mergedLogs.add(internal);
+        }
       }
+
+      mergedLogs.sort((a, b) {
+        final tsA = (a['timestamp'] as num?)?.toInt() ?? 0;
+        final tsB = (b['timestamp'] as num?)?.toInt() ?? 0;
+        return tsB.compareTo(tsA);
+      });
+
       final recordings = await CallerIdService.listRecordings();
       if (!mounted) return;
       setState(() {
-        _callLogs = logs;
+        _callLogs = mergedLogs;
         _recordings = recordings;
         _isLoading = false;
       });
@@ -340,7 +362,13 @@ class _RecentsScreenState extends State<RecentsScreen> {
     final title = student != null && student.name.isNotEmpty
         ? student.name
         : (phone.isNotEmpty ? phone : 'Unknown');
-    final dur = _formatDuration(durationSec);
+    final dur = durationSec > 0
+        ? _formatDuration(durationSec)
+        : (type == 'outgoing'
+            ? 'Unanswered'
+            : (type == 'missed'
+                ? 'Missed call'
+                : (type == 'rejected' ? 'Declined' : '')));
     final subtitleParts = <String>[
       if (student != null) phone,
       if (student != null && student.callStatus.isNotEmpty) student.callStatus,

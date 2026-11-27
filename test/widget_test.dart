@@ -3785,7 +3785,7 @@ void main() {
       await tester.tap(checkBtn);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
-      expect(find.text('LeadPilot is up to date (v1.32.0).'), findsOneWidget);
+      expect(find.text('LeadPilot is up to date (v1.32.1).'), findsOneWidget);
 
       // Toggle Auto-check
       final switchFinder = find.byKey(const Key('auto_check_updates_switch'));
@@ -4436,9 +4436,9 @@ void main() {
   });
 
   test(
-    'Clean Architecture: exports all modular components and version is 1.32.0',
+    'Clean Architecture: exports all modular components and version is 1.32.1',
     () {
-      expect(kAppVersion, '1.32.0');
+      expect(kAppVersion, '1.32.1');
       final store = MemoryAppSettingsStore();
       expect(store, isNotNull);
       const student = Student(name: 'Enterprise Lead', phone: '0771234567');
@@ -5065,13 +5065,13 @@ void main() {
       expect(stopCalled, isTrue);
 
       // Filter by Missed
-      await tester.tap(find.text('Missed'));
+      await tester.tap(find.widgetWithText(FilterChip, 'Missed'));
       await tester.pumpAndSettle();
       expect(find.text('Kasun Silva'), findsNothing);
       expect(find.text('0719998888'), findsOneWidget);
 
       // Filter by Recorded
-      await tester.tap(find.text('Recorded'));
+      await tester.tap(find.widgetWithText(FilterChip, 'Recorded'));
       await tester.pumpAndSettle();
       expect(find.text('Kasun Silva'), findsOneWidget);
       expect(find.text('0719998888'), findsNothing);
@@ -5114,6 +5114,79 @@ void main() {
       await tester.tap(find.text('Leads'));
       await tester.pumpAndSettle();
       expect(find.text('LeadPilot'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'RecentsScreen displays all calls: answered, missed, declined, and unanswered outgoing calls from merged system logs',
+    (tester) async {
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(CallerIdService.channel, (call) async {
+            if (call.method == 'getCallHistory') {
+              return [
+                {
+                  'phone': '0771112233',
+                  'duration': 65,
+                  'type': 'incoming',
+                  'timestamp': nowMs - 50000,
+                },
+              ];
+            }
+            if (call.method == 'getSystemCallLogs') {
+              return [
+                {
+                  'phone': '0714445566',
+                  'duration': 0,
+                  'type': 'missed',
+                  'timestamp': nowMs - 10000,
+                },
+                {
+                  'phone': '0789990000',
+                  'duration': 0,
+                  'type': 'outgoing',
+                  'timestamp': nowMs - 20000,
+                },
+                {
+                  'phone': '0753334444',
+                  'duration': 0,
+                  'type': 'rejected',
+                  'timestamp': nowMs - 30000,
+                },
+              ];
+            }
+            if (call.method == 'listRecordings') return [];
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(CallerIdService.channel, null);
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RecentsScreen(
+            students: const [
+              Student(name: 'Saman Kumara', phone: '0714445566'),
+            ],
+            onOpenStudent: (_) {},
+            onCallNumber: (_) async {},
+            onOpenDialpad: () {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // All 4 calls should be displayed
+      expect(find.text('Saman Kumara'), findsOneWidget); // matched missed call
+      expect(find.text('0789990000'), findsOneWidget); // unanswered outgoing call
+      expect(find.text('0753334444'), findsOneWidget); // declined call
+      expect(find.text('0771112233'), findsOneWidget); // answered incoming call
+
+      // Subtitle status representations
+      expect(find.text('Unanswered'), findsOneWidget);
+      expect(find.text('Declined'), findsOneWidget);
+      expect(find.text('1:05'), findsOneWidget);
     },
   );
 }
