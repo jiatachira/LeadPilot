@@ -201,9 +201,18 @@ class InCallActivity : Activity(), CallStateListener {
     }
 
     private fun setupButtonListeners() {
-        btnAnswer.setOnClickListener { LeadPilotCallManager.answer() }
-        btnDecline.setOnClickListener { LeadPilotCallManager.rejectOrEnd() }
-        btnEnd.setOnClickListener { LeadPilotCallManager.rejectOrEnd() }
+        btnAnswer.setOnClickListener {
+            InCallRingtoneManager.stopRinging(this)
+            LeadPilotCallManager.answer()
+        }
+        btnDecline.setOnClickListener {
+            InCallRingtoneManager.stopRinging(this)
+            LeadPilotCallManager.rejectOrEnd()
+        }
+        btnEnd.setOnClickListener {
+            InCallRingtoneManager.stopRinging(this)
+            LeadPilotCallManager.rejectOrEnd()
+        }
 
         btnMute.setOnClickListener { LeadPilotCallManager.toggleMute() }
         btnSpeaker.setOnClickListener { LeadPilotCallManager.toggleSpeaker() }
@@ -514,7 +523,18 @@ class InCallActivity : Activity(), CallStateListener {
         }
     }
 
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
+            if (LeadPilotCallManager.primaryCall?.state == Call.STATE_RINGING) {
+                InCallRingtoneManager.stopRinging(this)
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     override fun onDestroy() {
+        InCallRingtoneManager.stopRinging(this)
         handler.removeCallbacks(timerTick)
         LeadPilotCallManager.removeListener(this)
         releaseProximityWakeLock()

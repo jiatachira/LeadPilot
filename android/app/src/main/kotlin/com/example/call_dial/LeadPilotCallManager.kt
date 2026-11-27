@@ -135,9 +135,11 @@ object LeadPilotCallManager {
                     val (displayName, _) = resolveCallerDisplay(service.applicationContext, phone)
                     when (state) {
                         Call.STATE_RINGING -> {
+                            InCallRingtoneManager.startRinging(service.applicationContext)
                             InCallNotificationHelper.showIncomingCall(service.applicationContext, displayName, phone)
                         }
                         Call.STATE_DIALING, Call.STATE_CONNECTING, Call.STATE_ACTIVE, Call.STATE_HOLDING -> {
+                            InCallRingtoneManager.stopRinging(service.applicationContext)
                             if (state == Call.STATE_ACTIVE &&
                                 CallRecorderManager.isAutoRecordEnabled(service.applicationContext) &&
                                 !CallRecorderManager.isRecording
@@ -152,6 +154,7 @@ object LeadPilotCallManager {
                             )
                         }
                         Call.STATE_DISCONNECTED -> {
+                            InCallRingtoneManager.stopRinging(service.applicationContext)
                             if (CallRecorderManager.isRecording && secondaryCall == null) {
                                 CallRecorderManager.stopRecording()
                             }
@@ -160,7 +163,10 @@ object LeadPilotCallManager {
                     }
                 }
             } else if (state == Call.STATE_DISCONNECTED) {
-                inCallService?.let { recordEndedCall(it.applicationContext, call) }
+                inCallService?.let {
+                    InCallRingtoneManager.stopRinging(it.applicationContext)
+                    recordEndedCall(it.applicationContext, call)
+                }
             }
             notifyListeners()
         }
@@ -225,6 +231,7 @@ object LeadPilotCallManager {
         val phone = getPhoneNumber(call)
         val (displayName, _) = resolveCallerDisplay(context, phone)
         if (call.state == Call.STATE_RINGING) {
+            InCallRingtoneManager.startRinging(context)
             InCallNotificationHelper.showIncomingCall(context, displayName, phone)
         } else {
             InCallNotificationHelper.showOngoingCall(
@@ -255,6 +262,7 @@ object LeadPilotCallManager {
 
         val remaining = primaryCall
         if (remaining == null) {
+            InCallRingtoneManager.stopRinging(context)
             dtmfHandler.removeCallbacksAndMessages(null)
             CallRecorderManager.stopRecording()
             InCallNotificationHelper.cancel(context)
@@ -278,10 +286,12 @@ object LeadPilotCallManager {
     }
 
     fun answer() {
+        inCallService?.applicationContext?.let { InCallRingtoneManager.stopRinging(it) }
         primaryCall?.answer(VideoProfile.STATE_AUDIO_ONLY)
     }
 
     fun rejectOrEnd() {
+        inCallService?.applicationContext?.let { InCallRingtoneManager.stopRinging(it) }
         val call = primaryCall ?: return
         if (call.state == Call.STATE_RINGING) {
             call.reject(false, null)

@@ -104,7 +104,8 @@ class _RecentsScreenState extends State<RecentsScreen> {
   Student? _matchStudent(String phone) {
     for (final s in widget.students) {
       if (_phonesMatch(s.phone, phone) ||
-          (s.whatsappNumber.isNotEmpty && _phonesMatch(s.whatsappNumber, phone))) {
+          (s.whatsappNumber.isNotEmpty &&
+              _phonesMatch(s.whatsappNumber, phone))) {
         return s;
       }
     }
@@ -123,7 +124,8 @@ class _RecentsScreenState extends State<RecentsScreen> {
     if (matching.isEmpty) return null;
     if (callTimestampMs <= 0) return matching.first;
 
-    final maxWindowMs = (durationSec * 1000) + 120000; // duration + 2 min buffer
+    final maxWindowMs =
+        (durationSec * 1000) + 120000; // duration + 2 min buffer
     for (final r in matching) {
       final recTs = (r['timestampMs'] as num?)?.toInt() ?? 0;
       if (recTs > 0 && (callTimestampMs - recTs).abs() <= maxWindowMs) {
@@ -192,20 +194,19 @@ class _RecentsScreenState extends State<RecentsScreen> {
         _isPlaying = ok;
       });
       if (ok) {
-        _playbackPollTimer = Timer.periodic(
-          const Duration(milliseconds: 500),
-          (_) async {
-            final status = await CallerIdService.getPlaybackStatus();
-            final playing = status['isPlaying'] as bool? ?? false;
-            if (!playing && mounted) {
-              _playbackPollTimer?.cancel();
-              setState(() {
-                _isPlaying = false;
-                _playingPath = null;
-              });
-            }
-          },
-        );
+        _playbackPollTimer = Timer.periodic(const Duration(milliseconds: 500), (
+          _,
+        ) async {
+          final status = await CallerIdService.getPlaybackStatus();
+          final playing = status['isPlaying'] as bool? ?? false;
+          if (!playing && mounted) {
+            _playbackPollTimer?.cancel();
+            setState(() {
+              _isPlaying = false;
+              _playingPath = null;
+            });
+          }
+        });
       }
     }
   }
@@ -322,9 +323,12 @@ class _RecentsScreenState extends State<RecentsScreen> {
                 separatorBuilder: (_, _) => Divider(
                   height: 1,
                   indent: 72,
-                  color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+                  color: theme.colorScheme.outlineVariant.withValues(
+                    alpha: 0.5,
+                  ),
                 ),
-                itemBuilder: (ctx, i) => _buildCallTile(ctx, filtered[i], theme),
+                itemBuilder: (ctx, i) =>
+                    _buildCallTile(ctx, filtered[i], theme),
               ),
           ],
         ),
@@ -365,19 +369,22 @@ class _RecentsScreenState extends State<RecentsScreen> {
     final dur = durationSec > 0
         ? _formatDuration(durationSec)
         : (type == 'outgoing'
-            ? 'Unanswered'
-            : (type == 'missed'
-                ? 'Missed call'
-                : (type == 'rejected' ? 'Declined' : '')));
+              ? 'Unanswered'
+              : (type == 'missed'
+                    ? 'Missed call'
+                    : (type == 'rejected' ? 'Declined' : '')));
     final subtitleParts = <String>[
       if (student != null) phone,
       if (student != null && student.callStatus.isNotEmpty) student.callStatus,
       if (dur.isNotEmpty) dur,
     ];
-    final subtitle = subtitleParts.isNotEmpty ? subtitleParts.join(' • ') : type;
+    final subtitle = subtitleParts.isNotEmpty
+        ? subtitleParts.join(' • ')
+        : type;
     final relTime = timestampMs > 0 ? _relativeTime(timestampMs) : '';
     final recPath = recording?['path'] as String? ?? '';
-    final isThisPlaying = recPath.isNotEmpty && _playingPath == recPath && _isPlaying;
+    final isThisPlaying =
+        recPath.isNotEmpty && _playingPath == recPath && _isPlaying;
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -392,7 +399,9 @@ class _RecentsScreenState extends State<RecentsScreen> {
               title,
               style: theme.textTheme.bodyLarge?.copyWith(
                 fontWeight: FontWeight.w600,
-                color: type == 'missed' || type == 'rejected' ? Colors.red : null,
+                color: type == 'missed' || type == 'rejected'
+                    ? Colors.red
+                    : null,
               ),
               overflow: TextOverflow.ellipsis,
             ),
@@ -489,7 +498,10 @@ class _RecentsScreenState extends State<RecentsScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   ListTile(
-                    leading: const Icon(Icons.call_rounded, color: Colors.green),
+                    leading: const Icon(
+                      Icons.call_rounded,
+                      color: Colors.green,
+                    ),
                     title: Text('Call $phone'),
                     onTap: () {
                       Navigator.pop(ctx);
